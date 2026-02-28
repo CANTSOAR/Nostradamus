@@ -51,7 +51,6 @@ export function LayerControl() {
     showFlights, toggleFlights,
     showMilitaryFlights, toggleMilitaryFlights,
     showTraffic, toggleTraffic,
-    showEarthquakes, toggleEarthquakes,
     showCCTV, toggleCCTV,
     detectionMode, setDetectionMode,
     isFlythroughActive, toggleFlythrough,
@@ -121,7 +120,6 @@ export function LayerControl() {
         <Section title="GROUND" />
         <Toggle label="🚗 NJ Traffic" checked={showTraffic} onChange={toggleTraffic} color="#facc15" />
         <Toggle label="📹 CCTV Cams" checked={showCCTV} onChange={toggleCCTV} color="#a855f7" />
-        <Toggle label="🌍 Earthquakes" checked={showEarthquakes} onChange={toggleEarthquakes} color="#ef4444" />
 
         <Section title="CAMERA" />
         <Toggle label="🚁 Drone Flythrough" checked={isFlythroughActive} onChange={toggleFlythrough} color="#818cf8" />

@@ -56,10 +56,15 @@ echo "=== Step 8/9: Join and enrich all data ==="
 python join_and_enrich.py
 
 echo ""
-echo "=== Step 9/9: Generate county-level aggregates ==="
+echo "=== Step 9/10: Generate county-level aggregates ==="
 python generate_counties.py
+
+echo ""
+echo "=== Step 10/10: Fetch OSM road geometry ==="
+python fetch_roads.py
 
 echo ""
 echo "Pipeline complete."
 echo "  Tract output:  ../frontend/public/data/nj_tracts_enriched.geojson"
 echo "  County output: ../frontend/public/data/nj_counties_enriched.geojson"
+echo "  Roads output:  ../frontend/public/data/nj_roads.geojson"

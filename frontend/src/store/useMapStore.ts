@@ -43,9 +43,6 @@ interface MapStore {
   showTraffic: boolean;
   toggleTraffic: () => void;
 
-  showEarthquakes: boolean;
-  toggleEarthquakes: () => void;
-
   showCCTV: boolean;
   toggleCCTV: () => void;
 
@@ -71,6 +68,10 @@ interface MapStore {
   // --- Flythrough ---
   isFlythroughActive: boolean;
   toggleFlythrough: () => void;
+
+  // --- View Presets ---
+  viewPreset: "default" | "panoptic" | "tactical";
+  setViewPreset: (p: "default" | "panoptic" | "tactical") => void;
 
   // Future seam for Rust ABM — add simulation state here
   // simulationRunning: boolean;
@@ -129,17 +130,14 @@ export const useMapStore = create<MapStore>((set) => ({
   showSatellites: false,
   toggleSatellites: () => set((s) => ({ showSatellites: !s.showSatellites })),
 
-  showFlights: false,
+  showFlights: true,
   toggleFlights: () => set((s) => ({ showFlights: !s.showFlights })),
 
-  showMilitaryFlights: false,
+  showMilitaryFlights: true,
   toggleMilitaryFlights: () => set((s) => ({ showMilitaryFlights: !s.showMilitaryFlights })),
 
   showTraffic: false,
   toggleTraffic: () => set((s) => ({ showTraffic: !s.showTraffic })),
-
-  showEarthquakes: false,
-  toggleEarthquakes: () => set((s) => ({ showEarthquakes: !s.showEarthquakes })),
 
   showCCTV: false,
   toggleCCTV: () => set((s) => ({ showCCTV: !s.showCCTV })),
@@ -162,5 +160,9 @@ export const useMapStore = create<MapStore>((set) => ({
 
   isFlythroughActive: false,
   toggleFlythrough: () => set((s) => ({ isFlythroughActive: !s.isFlythroughActive })),
+
+  viewPreset: "default",
+  setViewPreset: (p) => set({ viewPreset: p }),
 }));
+
 

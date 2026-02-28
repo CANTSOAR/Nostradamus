@@ -6,6 +6,7 @@ import { LayerControl } from "./components/LayerControl";
 import { Legend } from "./components/Legend";
 import { NavigationBreadcrumb } from "./components/NavigationBreadcrumb";
 import { VisualModeSelector } from "./components/VisualModeSelector";
+import { ViewSelector } from "./components/ViewSelector";
 
 const panelStyle: React.CSSProperties = {
   background: "rgba(15,20,30,0.85)",
@@ -20,10 +21,13 @@ const panelStyle: React.CSSProperties = {
 export default function App() {
   const { activeVariable, viewLevel, selectedTractId } = useMapStore();
 
+
   return (
     <div style={{ width: "100vw", height: "100vh", position: "relative", background: "#020408" }}>
       {/* Globe fills entire viewport */}
       <CesiumMap />
+
+      {/* Panoptic HUD Overlays removed */}
 
       {/* Top-left: title + breadcrumb */}
       <div
@@ -37,7 +41,7 @@ export default function App() {
         }}
       >
         <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: "0.05em", color: "#94d2bd" }}>
-          PALANTIR AT HOME
+          NOSTRADAMUS
         </div>
         <div style={{ fontSize: 11, color: "#64748b", marginTop: 2, marginBottom: 8 }}>
           NJ Economic Atlas · ACS 2023 · BLS QCEW 2023
@@ -68,9 +72,17 @@ export default function App() {
           right: 16,
           padding: "12px 16px",
           minWidth: 160,
+          display: "flex",
+          flexDirection: "column",
+          gap: 16,
+          maxHeight: "calc(100vh - 120px)",
+          overflowY: "auto",
         }}
       >
         <LayerControl />
+        <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 12 }}>
+          <ViewSelector />
+        </div>
       </div>
 
       {/* Bottom-left: legend */}
@@ -101,36 +113,40 @@ export default function App() {
       </div>
 
       {/* Right panel — level-specific content */}
-      {viewLevel === "building" && (
-        <div
-          style={{
-            ...panelStyle,
-            position: "absolute",
-            top: 80,
-            right: 16,
-            padding: "16px",
-            width: 260,
-          }}
-        >
-          <SimulationPlaceholder />
-        </div>
-      )}
+      {
+        viewLevel === "building" && (
+          <div
+            style={{
+              ...panelStyle,
+              position: "absolute",
+              top: 80,
+              right: 16,
+              padding: "16px",
+              width: 260,
+            }}
+          >
+            <SimulationPlaceholder />
+          </div>
+        )
+      }
 
-      {(viewLevel === "tract") && selectedTractId && (
-        <div
-          style={{
-            ...panelStyle,
-            position: "absolute",
-            top: 80,
-            right: 16,
-            padding: "16px",
-            width: 260,
-          }}
-        >
-          <TractSidebar geoid={selectedTractId} />
-        </div>
-      )}
-    </div>
+      {
+        (viewLevel === "tract") && selectedTractId && (
+          <div
+            style={{
+              ...panelStyle,
+              position: "absolute",
+              top: 80,
+              right: 16,
+              padding: "16px",
+              width: 260,
+            }}
+          >
+            <TractSidebar geoid={selectedTractId} />
+          </div>
+        )
+      }
+    </div >
   );
 }
 

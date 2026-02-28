@@ -21,9 +21,10 @@ import {
   VerticalOrigin,
   HorizontalOrigin,
   Cartesian2,
-  EllipseGraphics,
-  HeightReference,
+  SampledPositionProperty,
+  JulianDate,
   NearFarScalar,
+  ExtrapolationType,
 } from "cesium";
 import type { TractProperties } from "../../types/tract";
 import type { BuildingProperties } from "../../types/building";
@@ -31,7 +32,6 @@ import { useMapStore } from "../../store/useMapStore";
 import { useChoropleth } from "../../hooks/useChoropleth";
 import { useSatellites } from "../../hooks/useSatellites";
 import { useFlights } from "../../hooks/useFlights";
-import { useEarthquakes } from "../../hooks/useEarthquakes";
 import CesiumNavigation from "cesium-navigation-es6";
 
 // NJ centroid at state overview altitude
@@ -63,6 +63,8 @@ const MOCK_MILITARY = [
   { icao24: "mil004", callsign: "USMC MV-22", lat: 40.15, lon: -74.85, altitude: 3050, heading: 45, velocity: 140 },
   { icao24: "mil005", callsign: "USCG HC-130", lat: 39.58, lon: -74.45, altitude: 5486, heading: 200, velocity: 165 },
 ];
+
+const PLANE_ICON = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJ3aGl0ZSIgc3Ryb2tlPSJibGFjayIgc3Ryb2tlLXdpZHRoPSIwLjUiPjxwYXRoIGQ9Ik0yMSAxNnYtMmwtOC01VjMuNWMwLS44My0uNjctMS41LTEuNS0xLjVTMTAgMi42NyAxMCAzLjVWOWwtOCA1djJsOC0yLjVWMTlsLTIgMS41VjIybDMuNS0xIDMuNSAxdi0xLjVMMTMgMTl2LTUuNWw4IDIuNXoiLz48L3N2Zz4=";
 
 // Feature data attached by useChoropleth
 type FeatureData = Record<string, unknown>;
@@ -182,50 +184,68 @@ const trafficParticles: Array<{
   lon: number;
   speed: number;
   heading: number;
+  segment: number[][]; // [lat, lon][]
+  t: number; // progress along segment [0, 1]
 }> = [];
 
-// NJ approximate road segments (lat/lon pairs as simple lines)
-const NJ_ROAD_LINES = [
-  // NJ Turnpike
-  { pts: [[40.18, -74.73], [40.49, -74.46], [40.65, -74.31], [40.75, -74.05], [40.92, -74.14]], arteries: true },
-  // Garden State Parkway
-  { pts: [[39.36, -74.42], [39.72, -74.24], [40.02, -74.15], [40.28, -74.12], [40.60, -74.10], [40.91, -74.06]], arteries: true },
-  // I-287
-  { pts: [[40.51, -74.63], [40.52, -74.40], [40.57, -74.28], [40.56, -74.06]], arteries: true },
-  // Route 1
-  { pts: [[40.31, -74.64], [40.43, -74.49], [40.57, -74.44], [40.74, -74.12]], arteries: false },
-  // Route 9
-  { pts: [[39.37, -74.43], [39.69, -74.27], [40.01, -74.15], [40.42, -74.30], [40.94, -74.12]], arteries: false },
-  // I-78
-  { pts: [[40.68, -74.04], [40.69, -74.38], [40.64, -74.71]], arteries: true },
-  // I-80
-  { pts: [[40.85, -74.04], [40.87, -74.38], [40.88, -74.72]], arteries: true },
-];
+interface RoadSegment {
+  pts: number[][]; // [lat, lon][]
+  type: string;
+}
+
+const roadSegments: RoadSegment[] = [];
+
+// Remove hardcoded NJ_ROAD_LINES
 
 function lerpPoint(a: number[], b: number[], t: number) {
   return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
 }
 
-function initTrafficParticles() {
+function initTrafficParticles(roads: RoadSegment[]) {
   trafficParticles.length = 0;
+  if (roads.length === 0) return;
+
+  // Optimization: Only use major roads (motorway, primary)
+  const majorRoads = roads.filter(r => r.type === "motorway" || r.type === "primary");
+  if (majorRoads.length === 0) return;
+
   let id = 0;
-  for (const road of NJ_ROAD_LINES) {
-    const count = road.arteries ? 12 : 6;
-    for (let i = 0; i < count; i++) {
-      const segIdx = Math.floor(Math.random() * (road.pts.length - 1));
+  // Determine particle count based on road type
+  const densityMap: Record<string, number> = {
+    motorway: 0.12,
+    primary: 0.06,
+  };
+
+  majorRoads.forEach((road) => {
+    const density = densityMap[road.type] || 0.02;
+    // Length approximation (sum of segment distances)
+    let length = 0;
+    for (let i = 0; i < road.pts.length - 1; i++) {
+      const dLat = road.pts[i + 1][0] - road.pts[i][0];
+      const dLon = road.pts[i + 1][1] - road.pts[i][1];
+      length += Math.sqrt(dLat * dLat + dLon * dLon);
+    }
+
+    const count = Math.ceil(length * 1000 * density);
+    for (let i = 0; i < Math.min(count, 3); i++) { // Cap per segment for performance
       const t = Math.random();
-      const p = lerpPoint(road.pts[segIdx], road.pts[segIdx + 1], t);
-      const next = lerpPoint(road.pts[segIdx], road.pts[segIdx + 1], Math.min(t + 0.01, 1));
-      const heading = Math.atan2(next[1] - p[1], next[0] - p[0]) * (180 / Math.PI);
+      const segIdx = Math.floor(Math.random() * (road.pts.length - 1));
+      const p1 = road.pts[segIdx];
+      const p2 = road.pts[segIdx + 1];
+      const pos = lerpPoint(p1, p2, t);
+      const heading = Math.atan2(p2[1] - p1[1], p2[0] - p1[0]) * (180 / Math.PI);
+
       trafficParticles.push({
         id: `t${id++}`,
-        lat: p[0],
-        lon: p[1],
-        speed: 0.0003 + Math.random() * 0.0004,
+        lat: pos[0],
+        lon: pos[1],
+        speed: (0.0002 + Math.random() * 0.0003) * (road.type === "motorway" ? 1.8 : 1.0),
         heading,
+        segment: road.pts,
+        t,
       });
     }
-  }
+  });
 }
 
 export function CesiumMap() {
@@ -239,11 +259,12 @@ export function CesiumMap() {
   const satEntitiesRef = useRef<Map<string, Entity>>(new Map());
   const flightEntitiesRef = useRef<Map<string, Entity>>(new Map());
   const milEntitiesRef = useRef<Map<string, Entity>>(new Map());
-  const eqEntitiesRef = useRef<Map<string, Entity>>(new Map());
   const cctvEntitiesRef = useRef<Map<string, Entity>>(new Map());
   const trafficEntitiesRef = useRef<Map<string, Entity>>(new Map());
   const trafficTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const roadsLoadedRef = useRef(false);
   const [activePOI, setActivePOI] = useState<string | null>(null);
+  const flightSampledPositionsRef = useRef<Map<string, SampledPositionProperty>>(new Map());
 
   const {
     activeVariable, showBuildings, showTracts, viewLevel,
@@ -251,15 +272,16 @@ export function CesiumMap() {
     isFlythroughActive,
     navigateToState, navigateToCounty, navigateToTract, navigateToBuilding,
     showSatellites, showFlights, showMilitaryFlights, showTraffic,
-    showEarthquakes, showCCTV,
+    showCCTV,
     detectionMode, setTrackedSatelliteId, setTrackedFlightIcao,
     trackedSatelliteId, trackedFlightIcao,
+    viewPreset,
   } = useMapStore();
 
   // --- Live data hooks ---
   const satellites = useSatellites(showSatellites, detectionMode);
   const flights = useFlights(showFlights);
-  const earthquakes = useEarthquakes(showEarthquakes);
+  // Earthquakes removed
 
   // Initialize Cesium viewer once
   useEffect(() => {
@@ -512,32 +534,42 @@ export function CesiumMap() {
 
     for (const fl of flights) {
       if (fl.onGround) continue;
-      const pos = Cartesian3.fromDegrees(fl.lon, fl.lat, fl.altitude);
-      const isTracked = fl.icao24 === trackedFlightIcao;
+      const pos = Cartesian3.fromDegrees(fl.lon, fl.lat, fl.altitude || 5000);
+      const now = JulianDate.now();
+
+      let sampled = flightSampledPositionsRef.current.get(fl.icao24);
+      if (!sampled) {
+        sampled = new SampledPositionProperty();
+        sampled.forwardExtrapolationType = ExtrapolationType.HOLD;
+        sampled.backwardExtrapolationType = ExtrapolationType.HOLD;
+        flightSampledPositionsRef.current.set(fl.icao24, sampled);
+      }
+      sampled.addSample(now, pos);
+
       if (existing.has(fl.icao24)) {
-        const ent = existing.get(fl.icao24)!;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (ent.position as any)?.setValue?.(pos);
+        // Position updated via sampled property
       } else {
         const ent = v.entities.add({
           id: `flt_${fl.icao24}`,
-          position: pos,
-          point: {
-            pixelSize: isTracked ? 12 : 8,
-            color: isTracked ? Color.YELLOW : Color.fromCssColorString("#60a5fa"),
-            outlineColor: Color.BLACK,
-            outlineWidth: 1,
-            scaleByDistance: new NearFarScalar(1e5, 1.5, 5e6, 0.5),
-          } as PointGraphics.ConstructorOptions,
+          position: sampled,
+          billboard: {
+            image: PLANE_ICON,
+            width: 24,
+            height: 24,
+            color: Color.fromCssColorString("#60a5fa"),
+            rotation: CesiumMath.toRadians(fl.heading + 90),
+            alignedAxis: Cartesian3.UNIT_Z,
+            scaleByDistance: new NearFarScalar(1e4, 1.2, 5e6, 0.4),
+          },
           label: {
             text: fl.callsign || fl.icao24,
             font: "bold 10px monospace",
-            fillColor: isTracked ? Color.YELLOW : Color.fromCssColorString("#93c5fd"),
+            fillColor: Color.fromCssColorString("#93c5fd"),
             outlineColor: Color.BLACK,
             outlineWidth: 1,
-            verticalOrigin: VerticalOrigin.BOTTOM,
-            pixelOffset: new Cartesian2(0, -10),
-            scaleByDistance: new NearFarScalar(1e4, 1.0, 2e6, 0.6),
+            verticalOrigin: VerticalOrigin.TOP,
+            pixelOffset: new Cartesian2(0, 15),
+            scaleByDistance: new NearFarScalar(1e4, 1.0, 5e5, 0.0),
           } as LabelGraphics.ConstructorOptions,
         });
         existing.set(fl.icao24, ent);
@@ -568,81 +600,37 @@ export function CesiumMap() {
       return;
     }
 
-    if (existing.size > 0) return; // already rendered
-
     for (const mil of MOCK_MILITARY) {
+      if (existing.has(mil.icao24)) continue;
       const pos = Cartesian3.fromDegrees(mil.lon, mil.lat, mil.altitude);
       const ent = v.entities.add({
         id: `mil_${mil.icao24}`,
         position: pos,
-        point: {
-          pixelSize: 10,
+        billboard: {
+          image: PLANE_ICON,
+          width: 24,
+          height: 24,
           color: Color.fromCssColorString("#f97316"),
-          outlineColor: Color.YELLOW,
-          outlineWidth: 2,
-          scaleByDistance: new NearFarScalar(1e5, 1.5, 5e6, 0.5),
-        } as PointGraphics.ConstructorOptions,
+          rotation: CesiumMath.toRadians(mil.heading + 90),
+          alignedAxis: Cartesian3.UNIT_Z,
+          scaleByDistance: new NearFarScalar(1e4, 1.2, 5e6, 0.4),
+        },
         label: {
           text: mil.callsign,
           font: "bold 11px monospace",
           fillColor: Color.fromCssColorString("#f97316"),
           outlineColor: Color.BLACK,
           outlineWidth: 2,
-          verticalOrigin: VerticalOrigin.BOTTOM,
-          pixelOffset: new Cartesian2(0, -12),
-          scaleByDistance: new NearFarScalar(1e4, 1.0, 3e6, 0.5),
+          verticalOrigin: VerticalOrigin.TOP,
+          pixelOffset: new Cartesian2(0, 15),
+          scaleByDistance: new NearFarScalar(1e4, 1.0, 1e6, 0.0),
         } as LabelGraphics.ConstructorOptions,
       });
       existing.set(mil.icao24, ent);
     }
   }, [showMilitaryFlights]);
 
-  // Earthquake entities
-  useEffect(() => {
-    const v = viewerRef.current;
-    if (!v) return;
-    const existing = eqEntitiesRef.current;
-
-    if (!showEarthquakes) {
-      existing.forEach((e) => v.entities.remove(e));
-      existing.clear();
-      return;
-    }
-
-    const incoming = new Set(earthquakes.map((q) => q.id));
-    existing.forEach((ent, id) => {
-      if (!incoming.has(id)) { v.entities.remove(ent); existing.delete(id); }
-    });
-
-    for (const eq of earthquakes) {
-      if (existing.has(eq.id)) continue;
-      const radius = Math.pow(10, eq.magnitude) * 800;
-      const ent = v.entities.add({
-        id: `eq_${eq.id}`,
-        position: Cartesian3.fromDegrees(eq.lon, eq.lat, 0),
-        ellipse: {
-          semiMinorAxis: radius,
-          semiMajorAxis: radius,
-          material: Color.fromCssColorString("#ef4444").withAlpha(0.3),
-          outline: true,
-          outlineColor: Color.fromCssColorString("#f87171"),
-          outlineWidth: 1,
-          heightReference: HeightReference.CLAMP_TO_GROUND,
-        } as EllipseGraphics.ConstructorOptions,
-        label: {
-          text: `M${eq.magnitude.toFixed(1)} ${eq.place.substring(0, 20)}`,
-          font: "10px monospace",
-          fillColor: Color.fromCssColorString("#fca5a5"),
-          outlineColor: Color.BLACK,
-          outlineWidth: 1,
-          verticalOrigin: VerticalOrigin.BOTTOM,
-          pixelOffset: new Cartesian2(0, -8),
-          scaleByDistance: new NearFarScalar(1e5, 1.5, 1e7, 0.5),
-        } as LabelGraphics.ConstructorOptions,
-      });
-      existing.set(eq.id, ent);
-    }
-  }, [earthquakes, showEarthquakes]);
+  // Earthquakes removed
 
   // CCTV camera pins
   useEffect(() => {
@@ -696,49 +684,101 @@ export function CesiumMap() {
       return;
     }
 
-    if (trafficParticles.length === 0) initTrafficParticles();
-
-    // Create entities once
-    if (existing.size === 0) {
-      for (const p of trafficParticles) {
-        const ent = v.entities.add({
-          id: `traf_${p.id}`,
-          position: Cartesian3.fromDegrees(p.lon, p.lat, 5),
-          point: {
-            pixelSize: 4,
-            color: Color.fromCssColorString("#facc15").withAlpha(0.85),
-            outlineColor: Color.fromCssColorString("#78350f"),
-            outlineWidth: 0,
-            scaleByDistance: new NearFarScalar(500, 2.0, 5e5, 0.3),
-          } as PointGraphics.ConstructorOptions,
-        });
-        existing.set(p.id, ent);
-      }
-    }
-
-    // Animate particles along their road headings
-    trafficTickRef.current = setInterval(() => {
-      if (!viewerRef.current || viewerRef.current.isDestroyed()) return;
-      for (const p of trafficParticles) {
-        const headRad = (p.heading * Math.PI) / 180;
-        p.lat += Math.sin(headRad) * p.speed * 0.5;
-        p.lon += Math.cos(headRad) * p.speed;
-
-        // Keep within rough NJ bounding box
-        if (p.lat < 38.9 || p.lat > 41.5 || p.lon < -75.6 || p.lon > -73.9) {
-          // Bounce: reset to a new road
-          p.lat = 39.0 + Math.random() * 2.5;
-          p.lon = -75.5 + Math.random() * 1.5;
-          p.heading = Math.random() * 360;
-        }
-
-        const ent = trafficEntitiesRef.current.get(p.id);
-        if (ent) {
+    const loadAndInit = async () => {
+      if (!roadsLoadedRef.current) {
+        try {
+          const resp = await fetch("/data/nj_roads.geojson");
+          const data = await resp.json();
+          roadSegments.length = 0;
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (ent.position as any)?.setValue?.(Cartesian3.fromDegrees(p.lon, p.lat, 5));
+          data.features.forEach((f: any) => {
+            if (f.geometry.type === "LineString") {
+              roadSegments.push({
+                pts: f.geometry.coordinates.map((c: number[]) => [c[1], c[0]]), // lon/lat -> lat/lon
+                type: f.properties.highway
+              });
+            }
+          });
+          roadsLoadedRef.current = true;
+          initTrafficParticles(roadSegments);
+        } catch (e) {
+          console.error("Failed to load roads", e);
+        }
+      } else if (trafficParticles.length === 0) {
+        initTrafficParticles(roadSegments);
+      }
+
+      // Create entities once
+      if (existing.size === 0) {
+        for (const p of trafficParticles) {
+          const ent = v.entities.add({
+            id: `traf_${p.id}`,
+            position: Cartesian3.fromDegrees(p.lon, p.lat, 2),
+            point: {
+              pixelSize: 4,
+              color: Color.fromCssColorString("#facc15").withAlpha(0.9),
+              outlineColor: Color.fromCssColorString("#000000"),
+              outlineWidth: 1,
+              scaleByDistance: new NearFarScalar(100, 2.0, 5000, 0.4),
+              distanceDisplayCondition: { near: 0, far: 8000 }, // Optimization: Hide when far
+            } as PointGraphics.ConstructorOptions,
+          });
+          existing.set(p.id, ent);
         }
       }
-    }, 100);
+
+      // Animate particles along their road paths
+      if (!trafficTickRef.current) {
+        trafficTickRef.current = setInterval(() => {
+          const vv = viewerRef.current;
+          if (!vv || vv.isDestroyed()) return;
+
+          // Optimization: Check camera height
+          const camHeight = vv.camera.positionCartographic.height;
+          if (camHeight > 30000) return; // Stop updates if too high
+
+          const camPos = vv.camera.position;
+
+          for (const p of trafficParticles) {
+            const pPos = Cartesian3.fromDegrees(p.lon, p.lat, 2);
+
+            // Optimization: Only update if within ~1.6km (1 mile)
+            const dist = Cartesian3.distance(camPos, pPos);
+            if (dist > 5000) continue;
+
+            p.t += p.speed * 4; // Move along segment
+
+            if (p.t >= 1) {
+              const road = roadSegments[Math.floor(Math.random() * roadSegments.length)];
+              p.segment = road.pts;
+              p.t = 0;
+            }
+
+            // Find current and next point in segment based on t
+            const segmentCount = p.segment.length - 1;
+            const floatIdx = p.t * segmentCount;
+            const idx = Math.floor(floatIdx);
+            const subT = floatIdx - idx;
+
+            if (idx < segmentCount) {
+              const p1 = p.segment[idx];
+              const p2 = p.segment[idx + 1];
+              const pos = lerpPoint(p1, p2, subT);
+              p.lat = pos[0];
+              p.lon = pos[1];
+            }
+
+            const ent = trafficEntitiesRef.current.get(p.id);
+            if (ent) {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (ent.position as any)?.setValue?.(Cartesian3.fromDegrees(p.lon, p.lat, 2));
+            }
+          }
+        }, 60);
+      }
+    };
+
+    loadAndInit();
 
     return () => {
       if (trafficTickRef.current) { clearInterval(trafficTickRef.current); trafficTickRef.current = null; }
@@ -769,6 +809,48 @@ export function CesiumMap() {
       });
     }
   }, [isFlythroughActive]);
+
+  // View presets — drive camera when preset changes
+  useEffect(() => {
+    const v = viewerRef.current;
+    if (!v || isFlythroughActive) return;
+
+    // Stop any active flythrough tick listeners first
+    if (viewPreset === "panoptic") {
+      // Dead overhead — straight down over NJ centroid
+      v.camera.flyTo({
+        destination: Cartesian3.fromDegrees(-74.4057, 40.0583, 280000),
+        orientation: {
+          heading: CesiumMath.toRadians(0),
+          pitch: CesiumMath.toRadians(-90),
+          roll: 0,
+        },
+        duration: 2.5,
+      });
+    } else if (viewPreset === "tactical") {
+      // Low angled recon look — NW NJ at 15° pitch
+      v.camera.flyTo({
+        destination: Cartesian3.fromDegrees(-74.7, 40.5, 35000),
+        orientation: {
+          heading: CesiumMath.toRadians(135),
+          pitch: CesiumMath.toRadians(-20),
+          roll: 0,
+        },
+        duration: 2.5,
+      });
+    } else {
+      // Default — back to NJ state overview
+      v.camera.flyTo({
+        destination: NJ_DESTINATION,
+        orientation: {
+          heading: CesiumMath.toRadians(0),
+          pitch: CesiumMath.toRadians(-45),
+          roll: 0,
+        },
+        duration: 1.5,
+      });
+    }
+  }, [viewPreset, isFlythroughActive]);
 
   // County/Tract choropleth
   const { entityMapRef: countyEntityMapRef } = useChoropleth({
