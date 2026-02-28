@@ -1,69 +1,84 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, type MutableRefObject } from "react";
 import {
   GeoJsonDataSource,
   ColorMaterialProperty,
   Color,
-  ScreenSpaceEventHandler,
-  ScreenSpaceEventType,
-  defined,
   type Viewer,
   type Entity,
 } from "cesium";
-import type { TractProperties } from "../types/tract";
 import type { VariableKey } from "../types/variables";
 import { buildColorScale } from "../lib/colorScale";
 import { hexToCesiumColor } from "../lib/cesiumColors";
 
-interface EntityWithProps extends Entity {
-  _tractProps?: TractProperties;
+// Generic feature data attached to each entity
+type FeatureData = Record<string, unknown>;
+
+interface EntityWithData extends Entity {
+  _featureData?: FeatureData;
 }
 
-interface UseChoroplethOptions {
+export interface UseChoroplethOptions {
   viewer: Viewer | null;
+  dataUrl: string;
   activeVariable: VariableKey;
   show: boolean;
-  onTractSelect: (geoid: string | null, props: TractProperties | null) => void;
+  /** When set, only show entities whose county_fips matches this value */
+  filterCountyFips?: string | null;
+  /** Entity map key field — 'GEOID' for tracts, 'county_fips' for counties */
+  keyField?: string;
+}
+
+export interface UseChoroplethResult {
+  entityMapRef: MutableRefObject<Map<string, Entity>>;
 }
 
 export function useChoropleth({
   viewer,
+  dataUrl,
   activeVariable,
   show,
-  onTractSelect,
-}: UseChoroplethOptions) {
-  // useRef survives React StrictMode double-mount
+  filterCountyFips,
+  keyField = "GEOID",
+}: UseChoroplethOptions): UseChoroplethResult {
   const dsRef = useRef<GeoJsonDataSource | null>(null);
-  const handlerRef = useRef<ScreenSpaceEventHandler | null>(null);
   const loadedRef = useRef(false);
+  const entityMapRef = useRef<Map<string, Entity>>(new Map());
 
-  // Load GeoJSON once
+  // Load GeoJSON once per dataUrl+viewer combination
   useEffect(() => {
     if (!viewer || loadedRef.current) return;
     loadedRef.current = true;
 
-    const ds = new GeoJsonDataSource("nj-tracts");
+    const dsName = `choropleth-${dataUrl}`;
+    const ds = new GeoJsonDataSource(dsName);
     dsRef.current = ds;
 
-    ds.load("/data/nj_tracts_enriched.geojson", {
+    ds.load(dataUrl, {
       stroke: Color.fromCssColorString("#1a1a2e").withAlpha(0.4),
       strokeWidth: 0.5,
       fill: Color.fromCssColorString("#334155").withAlpha(0.5),
       clampToGround: true,
-    }).then(() => {
-      viewer.dataSources.add(ds);
+    })
+      .then(() => {
+        viewer.dataSources.add(ds);
 
-      // Attach props to each entity for fast access
-      for (const entity of ds.entities.values) {
-        const props = entity.properties?.getValue(
-          viewer.clock.currentTime
-        ) as TractProperties | undefined;
-        if (props) {
-          (entity as EntityWithProps)._tractProps = props;
+        // Index entities by key field for fast lookup
+        const map = new Map<string, Entity>();
+        for (const entity of ds.entities.values) {
+          const props = entity.properties?.getValue(
+            viewer.clock.currentTime
+          ) as FeatureData | undefined;
+          if (props) {
+            (entity as EntityWithData)._featureData = props;
+            const key = props[keyField] as string | undefined;
+            if (key) map.set(key, entity);
+          }
         }
-      }
-    }).catch((err: unknown) => {
-      console.error("Failed to load nj_tracts_enriched.geojson:", err);
-    });
+        entityMapRef.current = map;
+      })
+      .catch((err: unknown) => {
+        console.error(`Failed to load ${dataUrl}:`, err);
+      });
 
     return () => {
       if (viewer && !viewer.isDestroyed()) {
@@ -71,11 +86,22 @@ export function useChoropleth({
       }
       dsRef.current = null;
       loadedRef.current = false;
+      entityMapRef.current = new Map();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewer]);
+  }, [viewer, dataUrl]);
 
-  // Apply choropleth coloring
+  // Determine visibility for a single entity
+  const isEntityVisible = useCallback(
+    (entity: EntityWithData): boolean => {
+      if (!filterCountyFips) return true;
+      const fips = entity._featureData?.county_fips as string | undefined;
+      return fips === filterCountyFips;
+    },
+    [filterCountyFips]
+  );
+
+  // Apply choropleth coloring + visibility
   const applyColoring = useCallback(() => {
     const ds = dsRef.current;
     if (!ds || !viewer) return;
@@ -83,23 +109,35 @@ export function useChoropleth({
     const entities = ds.entities.values;
     if (entities.length === 0) return;
 
-    const values = entities.map((e) => {
-      const raw = (e as EntityWithProps)._tractProps?.[activeVariable];
+    // Build color scale from visible entities only
+    const visibleEntities = entities.filter((e) =>
+      isEntityVisible(e as EntityWithData)
+    );
+
+    const values = visibleEntities.map((e) => {
+      const raw = (e as EntityWithData)._featureData?.[activeVariable];
       return typeof raw === "number" ? raw : null;
     });
 
     const scale = buildColorScale(values, activeVariable);
 
     for (const entity of entities) {
-      if (!entity.polygon) continue;
-      const val = (entity as EntityWithProps)._tractProps?.[activeVariable];
-      const colorStr = scale.getColor(typeof val === "number" ? val : null);
-      const cesiumColor = hexToCesiumColor(colorStr, 0.72);
-      entity.polygon.material = new ColorMaterialProperty(cesiumColor) as unknown as import("cesium").MaterialProperty;
+      const visible = show && isEntityVisible(entity as EntityWithData);
+      if (entity.polygon) {
+        entity.show = visible;
+        if (visible) {
+          const val = (entity as EntityWithData)._featureData?.[activeVariable];
+          const colorStr = scale.getColor(typeof val === "number" ? val : null);
+          const cesiumColor = hexToCesiumColor(colorStr, 0.72);
+          entity.polygon.material = new ColorMaterialProperty(
+            cesiumColor
+          ) as unknown as import("cesium").MaterialProperty;
+        }
+      }
     }
-  }, [viewer, activeVariable]);
+  }, [viewer, activeVariable, show, isEntityVisible]);
 
-  // Re-color when variable changes (with retry for initial load)
+  // Re-color when variable, show, or filter changes (with retry for initial load)
   useEffect(() => {
     if (!dsRef.current) return;
     applyColoring();
@@ -107,42 +145,12 @@ export function useChoropleth({
     return () => clearTimeout(t);
   }, [applyColoring]);
 
-  // Show/hide tracts
+  // Show/hide whole datasource when show changes
   useEffect(() => {
     if (dsRef.current) {
       dsRef.current.show = show;
     }
   }, [show]);
 
-  // Click handler — pick entity and fire onTractSelect
-  useEffect(() => {
-    if (!viewer) return;
-
-    const handler = new ScreenSpaceEventHandler(viewer.canvas);
-    handlerRef.current = handler;
-
-    handler.setInputAction((e: ScreenSpaceEventHandler.PositionedEvent) => {
-      const picked = viewer.scene.pick(e.position);
-      if (defined(picked) && picked.id) {
-        const entity = picked.id as EntityWithProps;
-        const props = entity._tractProps;
-        if (props?.GEOID) {
-          onTractSelect(props.GEOID, props);
-          // Yellow highlight for selected tract
-          if (entity.polygon) {
-            entity.polygon.material = new ColorMaterialProperty(
-              Color.YELLOW.withAlpha(0.6)
-            ) as unknown as import("cesium").MaterialProperty;
-          }
-          return;
-        }
-      }
-      onTractSelect(null, null);
-    }, ScreenSpaceEventType.LEFT_CLICK);
-
-    return () => {
-      if (!handler.isDestroyed()) handler.destroy();
-      handlerRef.current = null;
-    };
-  }, [viewer, onTractSelect]);
+  return { entityMapRef };
 }

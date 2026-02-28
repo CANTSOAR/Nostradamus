@@ -21,7 +21,7 @@ BLS_URL = "https://data.bls.gov/cew/data/api/2023/a/area/34{county_fips}.csv"
 OUT_PATH = pathlib.Path(__file__).parent / "data" / "nj_qcew.csv"
 
 HEADERS = {
-    "User-Agent": "palantir-at-home/0.1 (educational project)",
+    "User-Agent": "Nostradamus/0.1 (educational project)",
 }
 
 
