@@ -6,8 +6,8 @@ import {
   Cesium3DTileStyle,
   Math as CesiumMath,
   Color,
-  IonWorldImageryStyle,
-  createWorldImageryAsync,
+  IonImageryProvider,
+  OpenStreetMapImageryProvider,
   ScreenSpaceEventHandler,
   ScreenSpaceEventType,
   defined,
@@ -103,14 +103,24 @@ export function CesiumMap() {
     // @ts-expect-error
     bloom.uniforms.stepSize = 1.0;
 
-    // Satellite imagery with labels
-    createWorldImageryAsync({ style: IonWorldImageryStyle.AERIAL_WITH_LABELS })
-      .then((layer) => {
+    // Remove the default Bing Maps layer synchronously so no bad layer
+    // exists when Cesium renders its first frame (prevents queueReprojectionCommands crash)
+    v.imageryLayers.removeAll();
+
+    // Satellite imagery via Ion asset 2 (Cesium World Imagery)
+    IonImageryProvider.fromAssetId(2)
+      .then((provider) => {
         v.imageryLayers.removeAll();
-        v.imageryLayers.add(layer);
+        v.imageryLayers.addImageryProvider(provider);
       })
       .catch(() => {
-        // Fallback: keep default imagery if Ion fails
+        // Ion unavailable — fall back to OSM
+        v.imageryLayers.addImageryProvider(
+          new OpenStreetMapImageryProvider({
+            url: "https://tile.openstreetmap.org/",
+            credit: "© OpenStreetMap contributors",
+          })
+        );
       });
 
     // Fly to NJ
