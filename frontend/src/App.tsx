@@ -7,6 +7,7 @@ import { Legend } from "./components/Legend";
 import { NavigationBreadcrumb } from "./components/NavigationBreadcrumb";
 import { VisualModeSelector } from "./components/VisualModeSelector";
 import { ViewSelector } from "./components/ViewSelector";
+import { FlightInfoPanel } from "./components/FlightInfoPanel";
 
 const panelStyle: React.CSSProperties = {
   background: "rgba(15,20,30,0.85)",
@@ -19,7 +20,7 @@ const panelStyle: React.CSSProperties = {
 };
 
 export default function App() {
-  const { activeVariable, viewLevel, selectedTractId } = useMapStore();
+  const { activeVariable, viewLevel, selectedTractId, trackedFlightData } = useMapStore();
 
 
   return (
@@ -48,6 +49,22 @@ export default function App() {
         </div>
         <NavigationBreadcrumb />
       </div>
+
+      {/* Flight info panel — shown when a flight is tracked */}
+      {trackedFlightData && (
+        <div
+          style={{
+            ...panelStyle,
+            position: "absolute",
+            top: 130,
+            left: 16,
+            padding: "14px 16px",
+            width: 250,
+          }}
+        >
+          <FlightInfoPanel />
+        </div>
+      )}
 
       {/* Top-center: variable selector */}
       <div

@@ -25,6 +25,9 @@ import {
   JulianDate,
   NearFarScalar,
   ExtrapolationType,
+  Rectangle,
+  Cartographic,
+  Matrix4,
 } from "cesium";
 import type { TractProperties } from "../../types/tract";
 import type { BuildingProperties } from "../../types/building";
@@ -32,6 +35,7 @@ import { useMapStore } from "../../store/useMapStore";
 import { useChoropleth } from "../../hooks/useChoropleth";
 import { useSatellites } from "../../hooks/useSatellites";
 import { useFlights } from "../../hooks/useFlights";
+import type { FlightState } from "../../hooks/useFlights";
 import CesiumNavigation from "cesium-navigation-es6";
 
 // NJ centroid at state overview altitude
@@ -205,20 +209,24 @@ function initTrafficParticles(roads: RoadSegment[]) {
   trafficParticles.length = 0;
   if (roads.length === 0) return;
 
-  // Optimization: Only use major roads (motorway, primary)
+  // Use major roads only (motorway, primary)
   const majorRoads = roads.filter(r => r.type === "motorway" || r.type === "primary");
   if (majorRoads.length === 0) return;
 
   let id = 0;
-  // Determine particle count based on road type
   const densityMap: Record<string, number> = {
-    motorway: 0.12,
-    primary: 0.06,
+    motorway: 0.5,  // ~4x more than before
+    primary: 0.25,
+  };
+  const capMap: Record<string, number> = {
+    motorway: 20,
+    primary: 10,
   };
 
   majorRoads.forEach((road) => {
-    const density = densityMap[road.type] || 0.02;
-    // Length approximation (sum of segment distances)
+    const density = densityMap[road.type] || 0.1;
+    const cap = capMap[road.type] || 6;
+    // Length approximation (sum of segment distances in degrees)
     let length = 0;
     for (let i = 0; i < road.pts.length - 1; i++) {
       const dLat = road.pts[i + 1][0] - road.pts[i][0];
@@ -227,7 +235,7 @@ function initTrafficParticles(roads: RoadSegment[]) {
     }
 
     const count = Math.ceil(length * 1000 * density);
-    for (let i = 0; i < Math.min(count, 3); i++) { // Cap per segment for performance
+    for (let i = 0; i < Math.min(count, cap); i++) {
       const t = Math.random();
       const segIdx = Math.floor(Math.random() * (road.pts.length - 1));
       const p1 = road.pts[segIdx];
@@ -265,6 +273,11 @@ export function CesiumMap() {
   const roadsLoadedRef = useRef(false);
   const [activePOI, setActivePOI] = useState<string | null>(null);
   const flightSampledPositionsRef = useRef<Map<string, SampledPositionProperty>>(new Map());
+  const flightsRef = useRef<FlightState[]>([]);
+  const orbitTargetRef = useRef<Cartesian3>(Cartesian3.fromDegrees(-74.4057, 40.0583, 0));
+  const orbitStateRef = useRef({ heading: 0, pitch: CesiumMath.toRadians(-25), range: 5000 });
+  const orbitTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const flythroughCleanupRef = useRef<(() => void) | null>(null);
 
   const {
     activeVariable, showBuildings, showTracts, viewLevel,
@@ -273,9 +286,10 @@ export function CesiumMap() {
     navigateToState, navigateToCounty, navigateToTract, navigateToBuilding,
     showSatellites, showFlights, showMilitaryFlights, showTraffic,
     showCCTV,
-    detectionMode, setTrackedSatelliteId, setTrackedFlightIcao,
+    detectionMode, setTrackedSatelliteId, setTrackedFlightIcao, setTrackedFlightData,
     trackedSatelliteId, trackedFlightIcao,
     viewPreset,
+    isOrbitActive,
   } = useMapStore();
 
   // --- Live data hooks ---
@@ -423,6 +437,16 @@ export function CesiumMap() {
       if (!v) return;
 
       const key = e.key.toLowerCase();
+      const { isFlythroughActive, isOrbitActive, toggleFlythrough: stopFlythrough, toggleOrbit: stopOrbit } = useMapStore.getState();
+
+      // In flythrough or orbit mode, only ESC is processed here (WASD handled elsewhere)
+      if (isFlythroughActive || isOrbitActive) {
+        if (key === "escape") {
+          if (isFlythroughActive) stopFlythrough();
+          if (isOrbitActive) stopOrbit();
+        }
+        return;
+      }
 
       // POI shortcuts
       const poi = NJ_POIS.find((p) => p.key === key);
@@ -448,6 +472,16 @@ export function CesiumMap() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
+
+  // Keep flightsRef current and refresh tracked flight data on each poll
+  useEffect(() => {
+    flightsRef.current = flights;
+    const { trackedFlightIcao: icao } = useMapStore.getState();
+    if (icao) {
+      const found = flights.find((f) => f.icao24 === icao);
+      if (found) setTrackedFlightData({ ...found, isMilitary: false });
+    }
+  }, [flights, setTrackedFlightData]);
 
   // Satellite entities
   useEffect(() => {
@@ -719,8 +753,8 @@ export function CesiumMap() {
               color: Color.fromCssColorString("#facc15").withAlpha(0.9),
               outlineColor: Color.fromCssColorString("#000000"),
               outlineWidth: 1,
-              scaleByDistance: new NearFarScalar(100, 2.0, 5000, 0.4),
-              distanceDisplayCondition: { near: 0, far: 8000 }, // Optimization: Hide when far
+              scaleByDistance: new NearFarScalar(100, 2.0, 8000, 0.4),
+              distanceDisplayCondition: { near: 0, far: 12000 },
             } as PointGraphics.ConstructorOptions,
           });
           existing.set(p.id, ent);
@@ -739,19 +773,47 @@ export function CesiumMap() {
 
           const camPos = vv.camera.position;
 
+          // Compute camera view rectangle once per tick for despawn logic
+          const viewRect = vv.camera.computeViewRectangle(vv.scene.globe.ellipsoid);
+
           for (const p of trafficParticles) {
             const pPos = Cartesian3.fromDegrees(p.lon, p.lat, 2);
 
-            // Optimization: Only update if within ~1.6km (1 mile)
+            // Only update particles within 12km of camera
             const dist = Cartesian3.distance(camPos, pPos);
-            if (dist > 5000) continue;
+            if (dist > 12000) continue;
 
             p.t += p.speed * 4; // Move along segment
 
             if (p.t >= 1) {
-              const road = roadSegments[Math.floor(Math.random() * roadSegments.length)];
-              p.segment = road.pts;
               p.t = 0;
+              // Only teleport to a new road when particle has left the camera view
+              if (viewRect) {
+                const carto = Cartographic.fromDegrees(p.lon, p.lat);
+                if (!Rectangle.contains(viewRect, carto)) {
+                  // Off-screen: find a visible road segment to respawn on
+                  let found = false;
+                  for (let attempt = 0; attempt < 40; attempt++) {
+                    const r = roadSegments[Math.floor(Math.random() * roadSegments.length)];
+                    if (r.pts.length < 2) continue;
+                    const mid = r.pts[Math.floor(r.pts.length / 2)];
+                    if (Rectangle.contains(viewRect, Cartographic.fromDegrees(mid[1], mid[0]))) {
+                      p.segment = r.pts;
+                      p.t = Math.random();
+                      found = true;
+                      break;
+                    }
+                  }
+                  if (!found) {
+                    // Fallback: any random road
+                    p.segment = roadSegments[Math.floor(Math.random() * roadSegments.length)].pts;
+                  }
+                }
+                // In-view: loop same segment from t=0 (already reset above)
+              } else {
+                // Can't compute view rect — old behaviour
+                p.segment = roadSegments[Math.floor(Math.random() * roadSegments.length)].pts;
+              }
             }
 
             // Find current and next point in segment based on t
@@ -785,29 +847,170 @@ export function CesiumMap() {
     };
   }, [showTraffic]);
 
-  // Flythrough
+  // Orbit mode — auto-rotate around a pivot point
   useEffect(() => {
     const v = viewerRef.current;
     if (!v) return;
-    if (isFlythroughActive) {
-      v.camera.flyTo({
-        destination: Cartesian3.fromDegrees(-74.4500, 40.4800, 350),
-        orientation: { heading: CesiumMath.toRadians(320), pitch: CesiumMath.toRadians(-15), roll: 0 },
-        duration: 3,
-        complete: () => {
-          if (!useMapStore.getState().isFlythroughActive || v.isDestroyed()) return;
-          const tick = () => {
-            if (!useMapStore.getState().isFlythroughActive || v.isDestroyed()) {
-              v.clock.onTick.removeEventListener(tick);
-              return;
-            }
-            v.camera.moveForward(2.5);
-            v.camera.lookRight(CesiumMath.toRadians(0.06));
-          };
-          v.clock.onTick.addEventListener(tick);
-        },
-      });
+
+    if (!isOrbitActive) {
+      if (orbitTickRef.current) { clearInterval(orbitTickRef.current); orbitTickRef.current = null; }
+      if (!v.isDestroyed()) {
+        v.camera.lookAtTransform(Matrix4.IDENTITY);
+        v.scene.screenSpaceCameraController.enableRotate = true;
+        v.scene.screenSpaceCameraController.enableTranslate = true;
+        v.scene.screenSpaceCameraController.enableZoom = true;
+        v.scene.screenSpaceCameraController.enableTilt = true;
+      }
+      return;
     }
+
+    // Compute initial pivot from screen centre (where camera looks at the ground)
+    const scrCenter = new Cartesian2(v.canvas.clientWidth / 2, v.canvas.clientHeight / 2);
+    const picked = v.camera.pickEllipsoid(scrCenter, v.scene.globe.ellipsoid);
+    orbitTargetRef.current = picked ?? Cartesian3.fromDegrees(-74.4057, 40.0583, 0);
+
+    const range = Math.max(100, Cartesian3.distance(v.camera.position, orbitTargetRef.current));
+    const pitch = Math.max(CesiumMath.toRadians(-85), Math.min(CesiumMath.toRadians(-5), v.camera.pitch));
+    orbitStateRef.current = { heading: v.camera.heading, pitch, range };
+
+    // Disable Cesium's built-in controls while orbiting
+    v.scene.screenSpaceCameraController.enableRotate = false;
+    v.scene.screenSpaceCameraController.enableTranslate = false;
+    v.scene.screenSpaceCameraController.enableZoom = false;
+    v.scene.screenSpaceCameraController.enableTilt = false;
+
+    orbitTickRef.current = setInterval(() => {
+      if (!v || v.isDestroyed()) return;
+      const s = orbitStateRef.current;
+      s.heading += CesiumMath.toRadians(0.25); // ~23 s / revolution
+      v.camera.lookAt(orbitTargetRef.current, new HeadingPitchRange(s.heading, s.pitch, s.range));
+    }, 16);
+
+    // Scroll wheel → zoom (change orbit radius)
+    const onWheel = (e: WheelEvent) => {
+      orbitStateRef.current.range = Math.max(50, orbitStateRef.current.range * (e.deltaY > 0 ? 1.12 : 0.89));
+      e.preventDefault();
+    };
+    v.canvas.addEventListener("wheel", onWheel, { passive: false });
+
+    return () => {
+      if (orbitTickRef.current) { clearInterval(orbitTickRef.current); orbitTickRef.current = null; }
+      v.canvas.removeEventListener("wheel", onWheel);
+      if (!v.isDestroyed()) {
+        v.camera.lookAtTransform(Matrix4.IDENTITY);
+        v.scene.screenSpaceCameraController.enableRotate = true;
+        v.scene.screenSpaceCameraController.enableTranslate = true;
+        v.scene.screenSpaceCameraController.enableZoom = true;
+        v.scene.screenSpaceCameraController.enableTilt = true;
+      }
+    };
+  }, [isOrbitActive]);
+
+  // Drone Flythrough — WASD + mouse free-fly
+  useEffect(() => {
+    const v = viewerRef.current;
+    if (!v) return;
+
+    if (!isFlythroughActive) {
+      v.camera.cancelFlight?.();
+      flythroughCleanupRef.current?.();
+      flythroughCleanupRef.current = null;
+      if (!v.isDestroyed()) {
+        v.scene.screenSpaceCameraController.enableRotate = true;
+        v.scene.screenSpaceCameraController.enableTranslate = true;
+        v.scene.screenSpaceCameraController.enableZoom = true;
+        v.scene.screenSpaceCameraController.enableTilt = true;
+      }
+      return;
+    }
+
+    // Disable Cesium's built-in controls — WASD takes over
+    v.scene.screenSpaceCameraController.enableRotate = false;
+    v.scene.screenSpaceCameraController.enableTranslate = false;
+    v.scene.screenSpaceCameraController.enableZoom = false;
+    v.scene.screenSpaceCameraController.enableTilt = false;
+
+    v.camera.flyTo({
+      destination: Cartesian3.fromDegrees(-74.4500, 40.4800, 350),
+      orientation: { heading: CesiumMath.toRadians(320), pitch: CesiumMath.toRadians(-15), roll: 0 },
+      duration: 2,
+      complete: () => {
+        if (!useMapStore.getState().isFlythroughActive || v.isDestroyed()) return;
+
+        const keysHeld = new Set<string>();
+        const mouseAccum = { dx: 0, dy: 0 };
+        let pointerLocked = false;
+
+        const onKeyDown = (e: KeyboardEvent) => { keysHeld.add(e.key.toLowerCase()); };
+        const onKeyUp = (e: KeyboardEvent) => { keysHeld.delete(e.key.toLowerCase()); };
+        // capture=true so WASD fires before bubble-phase POI handler
+        window.addEventListener("keydown", onKeyDown, true);
+        window.addEventListener("keyup", onKeyUp, true);
+
+        const canvas = v.canvas;
+        const onPLChange = () => { pointerLocked = document.pointerLockElement === canvas; };
+        document.addEventListener("pointerlockchange", onPLChange);
+
+        const onMouseMove = (e: MouseEvent) => {
+          if (!pointerLocked) return;
+          mouseAccum.dx += e.movementX;
+          mouseAccum.dy += e.movementY;
+        };
+        document.addEventListener("mousemove", onMouseMove);
+
+        // Click canvas to capture pointer lock
+        const onCanvasClick = () => { if (!pointerLocked) canvas.requestPointerLock(); };
+        canvas.addEventListener("click", onCanvasClick);
+
+        const LOOK_SENS = 0.003;
+        const SPEED_NORMAL = 3;  // m/frame
+        const SPEED_FAST = 15;   // m/frame with Shift
+
+        const tick = () => {
+          if (!useMapStore.getState().isFlythroughActive || v.isDestroyed()) {
+            v.clock.onTick.removeEventListener(tick);
+            return;
+          }
+          const speed = keysHeld.has("shift") ? SPEED_FAST : SPEED_NORMAL;
+          if (keysHeld.has("w")) v.camera.moveForward(speed);
+          if (keysHeld.has("s")) v.camera.moveBackward(speed);
+          if (keysHeld.has("a")) v.camera.moveLeft(speed);
+          if (keysHeld.has("d")) v.camera.moveRight(speed);
+          if (keysHeld.has(" ")) v.camera.moveUp(speed);
+          if (keysHeld.has("c")) v.camera.moveDown(speed);
+
+          if (mouseAccum.dx !== 0 || mouseAccum.dy !== 0) {
+            v.camera.lookRight(mouseAccum.dx * LOOK_SENS);
+            v.camera.lookUp(-mouseAccum.dy * LOOK_SENS);
+            mouseAccum.dx = 0;
+            mouseAccum.dy = 0;
+          }
+        };
+        v.clock.onTick.addEventListener(tick);
+
+        flythroughCleanupRef.current = () => {
+          v.clock.onTick.removeEventListener(tick);
+          window.removeEventListener("keydown", onKeyDown, true);
+          window.removeEventListener("keyup", onKeyUp, true);
+          document.removeEventListener("pointerlockchange", onPLChange);
+          document.removeEventListener("mousemove", onMouseMove);
+          canvas.removeEventListener("click", onCanvasClick);
+          if (document.exitPointerLock) document.exitPointerLock();
+        };
+      },
+    });
+
+    return () => {
+      v.camera.cancelFlight?.();
+      flythroughCleanupRef.current?.();
+      flythroughCleanupRef.current = null;
+      if (!v.isDestroyed()) {
+        v.scene.screenSpaceCameraController.enableRotate = true;
+        v.scene.screenSpaceCameraController.enableTranslate = true;
+        v.scene.screenSpaceCameraController.enableZoom = true;
+        v.scene.screenSpaceCameraController.enableTilt = true;
+      }
+    };
   }, [isFlythroughActive]);
 
   // View presets — drive camera when preset changes
@@ -905,6 +1108,17 @@ export function CesiumMap() {
     handlerRef.current = handler;
 
     handler.setInputAction((e: ScreenSpaceEventHandler.PositionedEvent) => {
+      // Orbit mode: left-click repositions the pivot
+      if (useMapStore.getState().isOrbitActive) {
+        const pos = v.scene.pickPosition(e.position)
+          ?? v.camera.pickEllipsoid(e.position, v.scene.globe.ellipsoid);
+        if (pos) {
+          orbitTargetRef.current = pos;
+          orbitStateRef.current.range = Math.max(50, Cartesian3.distance(v.camera.position, pos));
+        }
+        return;
+      }
+
       const picked = v.scene.pick(e.position);
       if (!defined(picked)) return;
 
@@ -931,6 +1145,21 @@ export function CesiumMap() {
       if (typeof id === "string" && id.startsWith("flt_")) {
         const icao = id.replace("flt_", "");
         setTrackedFlightIcao(icao);
+        const found = flightsRef.current.find((f) => f.icao24 === icao);
+        if (found) setTrackedFlightData({ ...found, isMilitary: false });
+        return;
+      }
+      // Military flight click
+      if (typeof id === "string" && id.startsWith("mil_")) {
+        const icao = id.replace("mil_", "");
+        const mil = MOCK_MILITARY.find((m) => m.icao24 === icao);
+        if (mil) {
+          setTrackedFlightData({
+            icao24: mil.icao24, callsign: mil.callsign,
+            altitude: mil.altitude, velocity: mil.velocity,
+            heading: mil.heading, onGround: false, isMilitary: true,
+          });
+        }
         return;
       }
 
@@ -947,7 +1176,7 @@ export function CesiumMap() {
       if (!handler.isDestroyed()) handler.destroy();
       handlerRef.current = null;
     };
-  }, [viewLevel, navigateToState, navigateToCounty, navigateToTract, navigateToBuilding, setTrackedSatelliteId, setTrackedFlightIcao]);
+  }, [viewLevel, navigateToState, navigateToCounty, navigateToTract, navigateToBuilding, setTrackedSatelliteId, setTrackedFlightIcao, setTrackedFlightData]);
 
   return (
     <>
@@ -966,6 +1195,42 @@ export function CesiumMap() {
           animation: "poi-fade 2.5s forwards",
         }}>
           ⬡ {activePOI.toUpperCase()}
+        </div>
+      )}
+      {/* Orbit mode HUD */}
+      {isOrbitActive && (
+        <div style={{
+          position: "absolute", top: 72, left: "50%", transform: "translateX(-50%)",
+          background: "rgba(148,210,189,0.08)", border: "1px solid rgba(148,210,189,0.3)",
+          borderRadius: 6, padding: "4px 14px", fontFamily: "monospace", fontSize: 11,
+          color: "#94d2bd", pointerEvents: "none", letterSpacing: "0.08em",
+          display: "flex", gap: 14, alignItems: "center",
+        }}>
+          <span>⟳ ORBIT MODE</span>
+          <span style={{ color: "#475569" }}>·</span>
+          <span style={{ color: "#64748b" }}>Click ground = new pivot</span>
+          <span style={{ color: "#475569" }}>·</span>
+          <span style={{ color: "#64748b" }}>Scroll = zoom</span>
+          <span style={{ color: "#475569" }}>·</span>
+          <span style={{ color: "#64748b" }}>ESC to exit</span>
+        </div>
+      )}
+      {/* Flythrough WASD HUD */}
+      {isFlythroughActive && (
+        <div style={{
+          position: "absolute", top: 72, left: "50%", transform: "translateX(-50%)",
+          background: "rgba(129,140,248,0.08)", border: "1px solid rgba(129,140,248,0.3)",
+          borderRadius: 6, padding: "4px 14px", fontFamily: "monospace", fontSize: 11,
+          color: "#818cf8", pointerEvents: "none", letterSpacing: "0.08em",
+          display: "flex", gap: 14, alignItems: "center",
+        }}>
+          <span>🚁 DRONE CAM</span>
+          <span style={{ color: "#475569" }}>·</span>
+          <span style={{ color: "#64748b" }}>Click map = capture mouse</span>
+          <span style={{ color: "#475569" }}>·</span>
+          <span style={{ color: "#64748b" }}>WASD = move · Space/C = up/down · Shift = fast</span>
+          <span style={{ color: "#475569" }}>·</span>
+          <span style={{ color: "#64748b" }}>ESC = exit</span>
         </div>
       )}
       {/* Tracking indicators */}

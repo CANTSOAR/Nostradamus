@@ -6,6 +6,16 @@ import type { BuildingProperties } from "../types/building";
 
 export type VisualMode = "default" | "crt" | "nightvision" | "flir" | "noir" | "anime" | "highcontrast";
 
+export interface TrackedFlightInfo {
+  icao24: string;
+  callsign: string;
+  altitude: number;  // meters
+  velocity: number;  // m/s
+  heading: number;   // degrees
+  onGround: boolean;
+  isMilitary: boolean;
+}
+
 interface MapStore {
   // --- Navigation ---
   viewLevel: ViewLevel;
@@ -57,6 +67,9 @@ interface MapStore {
   trackedFlightIcao: string | null;
   setTrackedFlightIcao: (id: string | null) => void;
 
+  trackedFlightData: TrackedFlightInfo | null;
+  setTrackedFlightData: (f: TrackedFlightInfo | null) => void;
+
   // --- Visual Modes ---
   visualMode: VisualMode;
   setVisualMode: (mode: VisualMode) => void;
@@ -68,6 +81,10 @@ interface MapStore {
   // --- Flythrough ---
   isFlythroughActive: boolean;
   toggleFlythrough: () => void;
+
+  // --- Orbit mode ---
+  isOrbitActive: boolean;
+  toggleOrbit: () => void;
 
   // --- View Presets ---
   viewPreset: "default" | "panoptic" | "tactical";
@@ -151,6 +168,9 @@ export const useMapStore = create<MapStore>((set) => ({
   trackedFlightIcao: null,
   setTrackedFlightIcao: (id) => set({ trackedFlightIcao: id }),
 
+  trackedFlightData: null,
+  setTrackedFlightData: (f) => set({ trackedFlightData: f }),
+
   visualMode: "default",
   setVisualMode: (mode) => set({ visualMode: mode }),
   visualIntensity: 0.5,
@@ -159,7 +179,10 @@ export const useMapStore = create<MapStore>((set) => ({
   setVisualNoise: (v) => set({ visualNoise: v }),
 
   isFlythroughActive: false,
-  toggleFlythrough: () => set((s) => ({ isFlythroughActive: !s.isFlythroughActive })),
+  toggleFlythrough: () => set((s) => ({ isFlythroughActive: !s.isFlythroughActive, isOrbitActive: false })),
+
+  isOrbitActive: false,
+  toggleOrbit: () => set((s) => ({ isOrbitActive: !s.isOrbitActive, isFlythroughActive: false })),
 
   viewPreset: "default",
   setViewPreset: (p) => set({ viewPreset: p }),

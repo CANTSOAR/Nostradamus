@@ -54,6 +54,7 @@ export function LayerControl() {
     showCCTV, toggleCCTV,
     detectionMode, setDetectionMode,
     isFlythroughActive, toggleFlythrough,
+    isOrbitActive, toggleOrbit,
     trackedSatelliteId, setTrackedSatelliteId,
     trackedFlightIcao, setTrackedFlightIcao,
   } = useMapStore();
@@ -122,7 +123,20 @@ export function LayerControl() {
         <Toggle label="📹 CCTV Cams" checked={showCCTV} onChange={toggleCCTV} color="#a855f7" />
 
         <Section title="CAMERA" />
+        <Toggle label="⟳ Orbit Mode" checked={isOrbitActive} onChange={toggleOrbit} color="#94d2bd" />
+        {isOrbitActive && (
+          <div style={{ fontSize: 9, color: "#64748b", marginLeft: 16, lineHeight: 1.5 }}>
+            Click ground → new pivot<br />
+            Scroll → zoom
+          </div>
+        )}
         <Toggle label="🚁 Drone Flythrough" checked={isFlythroughActive} onChange={toggleFlythrough} color="#818cf8" />
+        {isFlythroughActive && (
+          <div style={{ fontSize: 9, color: "#64748b", marginLeft: 16, lineHeight: 1.5 }}>
+            Click map → capture mouse<br />
+            WASD · Space/C · Shift=fast
+          </div>
+        )}
 
         <div style={{
           marginTop: 8, padding: "6px 8px", borderRadius: 5,
