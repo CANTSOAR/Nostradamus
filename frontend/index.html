@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nostradamus Live Simulation</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #0b0c10;
+            color: #c5c6c7;
+            font-family: 'Inter', sans-serif;
+            display: flex;
+        }
+
+        #dashboard {
+            width: 300px;
+            height: 100vh;
+            background: rgba(31, 40, 51, 0.95);
+            padding: 20px;
+            box-shadow: 2px 0 10px rgba(0, 0, 0, 0.5);
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        h2 {
+            margin-top: 0;
+            color: #66fcf1;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 1.2rem;
+        }
+
+        .metric-card {
+            background: #1f2833;
+            border-left: 4px solid #45a29e;
+            padding: 10px 15px;
+            border-radius: 4px;
+        }
+
+        .metric-card span {
+            display: block;
+            font-size: 0.85rem;
+            color: #c5c6c7;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .metric-card strong {
+            font-size: 1.5rem;
+            color: #fff;
+        }
+
+        #canvas-container {
+            flex-grow: 1;
+            position: relative;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        .status {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            padding: 5px 12px;
+            background: rgba(69, 162, 158, 0.2);
+            border: 1px solid #45a29e;
+            color: #66fcf1;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% {
+                opacity: 0.7;
+            }
+
+            50% {
+                opacity: 1;
+            }
+
+            100% {
+                opacity: 0.7;
+            }
+        }
+
+        #legend {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(31, 40, 51, 0.9);
+            padding: 15px;
+            border-radius: 6px;
+            border: 1px solid #45a29e;
+            font-size: 0.85rem;
+        }
+
+        #legend h4 {
+            margin: 0 0 10px 0;
+            color: #66fcf1;
+            text-transform: uppercase;
+            font-size: 1rem;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .legend-item span {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            margin-right: 10px;
+            border-radius: 2px;
+        }
+
+        .legend-agent {
+            border-radius: 50% !important;
+        }
+
+        #tooltip {
+            position: absolute;
+            background: rgba(11, 12, 16, 0.95);
+            border: 1px solid #66fcf1;
+            padding: 12px;
+            border-radius: 4px;
+            color: #c5c6c7;
+            pointer-events: none;
+            z-index: 100;
+            font-size: 0.85rem;
+            display: none;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.5);
+            white-space: pre-wrap;
+            line-height: 1.4;
+        }
+
+        #tooltip strong {
+            color: #fff;
+            display: block;
+            margin-bottom: 4px;
+            font-size: 0.95rem;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="dashboard">
+        <h2>Global Metrics</h2>
+        <div class="metric-card">
+            <span>Tick Speed</span>
+            <strong id="m-tick">0</strong>
+        </div>
+        <div class="metric-card">
+            <span>Active Locations</span>
+            <strong id="m-locs">0</strong>
+        </div>
+        <div class="metric-card">
+            <span>Inflation Rate</span>
+            <strong id="m-inflation">0%</strong>
+        </div>
+        <div class="metric-card">
+            <span>Base Tax Rate</span>
+            <strong id="m-tax">0%</strong>
+        </div>
+        <div class="metric-card">
+            <span>Active Agents</span>
+            <strong id="m-agents">0</strong>
+        </div>
+        <div style="margin-top: auto;">
+            <button id="btn-pause"
+                style="width: 100%; padding: 12px; background: #66fcf1; color: #0b0c10; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; text-transform: uppercase; transition: background 0.3s;">Pause
+                Viewer</button>
+        </div>
+    </div>
+    <div id="canvas-container">
+        <div class="status" id="ws-status">Connecting to Engine...</div>
+        <div id="controls">
+            <div class="ctrl-btn" id="btn-zin" title="Zoom In">+</div>
+            <div class="ctrl-btn" id="btn-up" title="Pan Up">↑</div>
+            <div class="ctrl-btn" id="btn-zout" title="Zoom Out">-</div>
+            <div class="ctrl-btn" id="btn-left" title="Pan Left">←</div>
+            <div class="ctrl-btn" id="btn-down" title="Pan Down">↓</div>
+            <div class="ctrl-btn" id="btn-right" title="Pan Right">→</div>
+        </div>
+        <div id="legend">
+            <h4>Legend</h4>
+            <div class="legend-item"><span style="background: #ffaa00;"></span> Store</div>
+            <div class="legend-item"><span style="background: #66fcf1;"></span> Employer</div>
+            <div class="legend-item"><span style="background: #4a4e69;"></span> Home</div>
+            <div class="legend-item"><span style="background: #ffffff;"></span> Public/Mixed</div>
+            <div class="legend-item"><span class="legend-agent" style="background: #ff4d4d;"></span> Agent (Moving)
+            </div>
+            <div style="margin-top: 10px; font-size: 0.75rem; color: #888;">Scroll: Zoom | Click & Drag: Pan</div>
+        </div>
+        <div id="tooltip"></div>
+        <canvas id="simCanvas"></canvas>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>
