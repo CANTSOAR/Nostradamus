@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { viteStaticCopy } from "vite-plugin-static-copy";
 import path from "path";
@@ -27,5 +27,14 @@ export default defineConfig({
   },
   build: {
     chunkSizeWarningLimit: 5000,
+  },
+  test: {
+    environment: "jsdom",
+    globals: true,
+    setupFiles: ["./src/test/setup.ts"],
+    exclude: ["node_modules/**", "dist/**"],
+    alias: {
+      cesium: new URL("./src/test/__mocks__/cesium.ts", import.meta.url).pathname,
+    },
   },
 });
