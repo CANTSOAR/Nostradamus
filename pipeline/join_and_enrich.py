@@ -79,9 +79,27 @@ def main():
         "poverty_rate", "unemployment_rate", "county_employment",
         "commuter_outflow", "local_job_count", "rent_2br",
     ]
+    # Also coerce any UEZ-sourced numeric columns
+    uez_numeric_prefixes = ("industrial_", "uez_")
+    for col in merged.columns:
+        if any(col.startswith(p) for p in uez_numeric_prefixes):
+            float_cols.append(col)
     for col in float_cols:
         if col in merged.columns:
             merged[col] = pd.to_numeric(merged[col], errors="coerce")
+
+    # --- Join UEZ municipal data (optional — only if join_uez.py has been run) ---
+    UEZ_BY_TRACT = pathlib.Path(__file__).parent / "data" / "nj_uez_by_tract.csv"
+    if UEZ_BY_TRACT.exists():
+        print("Loading UEZ municipal data...")
+        uez = pd.read_csv(UEZ_BY_TRACT, dtype={"GEOID": str})
+        uez["GEOID"] = uez["GEOID"].astype(str).str.zfill(11)
+        # Exclude mcd_name if it duplicates existing columns
+        merge_cols = [c for c in uez.columns if c == "GEOID" or c not in merged.columns]
+        merged = merged.merge(uez[merge_cols], on="GEOID", how="left")
+        print(f"  UEZ join: {len(merged)} tracts after merge")
+    else:
+        print("(Skipping UEZ data — run fetch_uez.py + join_uez.py to add it)")
 
     # --- Write output ---
     print(f"Writing enriched GeoJSON to {OUT_PATH}...")

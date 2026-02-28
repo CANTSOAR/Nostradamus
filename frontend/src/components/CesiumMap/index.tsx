@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Viewer,
   Cartesian3,
@@ -28,12 +28,18 @@ interface EntityWithData extends Entity {
   _featureData?: FeatureData;
 }
 
+// Buildings are visible at county zoom level and closer
+function buildingsVisible(viewLevel: string, showBuildings: boolean) {
+  return showBuildings && viewLevel !== "state";
+}
+
 export function CesiumMap() {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<Viewer | null>(null);
   const tilesetRef = useRef<Cesium3DTileset | null>(null);
   const handlerRef = useRef<ScreenSpaceEventHandler | null>(null);
   const initDoneRef = useRef(false);
+  const [tilesetError, setTilesetError] = useState<string | null>(null);
 
   const {
     activeVariable,
@@ -137,36 +143,38 @@ export function CesiumMap() {
     viewerRef.current = v;
 
     // OSM 3D Buildings — Cesium Ion asset 96188
+    // Note: asset 96188 must be added to your Ion account at ion.cesium.com
     Cesium3DTileset.fromIonAssetId(96188)
       .then((tileset) => {
         tilesetRef.current = tileset;
         v.scene.primitives.add(tileset);
 
+        // Improve tile loading performance
+        tileset.maximumScreenSpaceError = 16;
+
         // Dark cyberpunk building style
         tileset.style = new Cesium3DTileStyle({
           color: {
             conditions: [
-              [
-                "${feature['cesium#estimatedHeight']} > 150",
-                "color('rgba(120,230,255,0.95)')",
-              ],
-              [
-                "${feature['cesium#estimatedHeight']} > 60",
-                "color('rgba(70,170,225,0.9)')",
-              ],
-              [
-                "${feature['cesium#estimatedHeight']} > 20",
-                "color('rgba(45,110,180,0.85)')",
-              ],
-              ["true", "color('rgba(28,65,120,0.8)')"],
+              ["${feature['cesium#estimatedHeight']} > 150", "color('rgba(120,230,255,0.95)')"],
+              ["${feature['cesium#estimatedHeight']} > 60",  "color('rgba(70,170,225,0.9)')"],
+              ["${feature['cesium#estimatedHeight']} > 20",  "color('rgba(45,110,180,0.85)')"],
+              ["true",                                        "color('rgba(28,65,120,0.8)')"],
             ],
           },
         });
 
-        tileset.show = showBuildings && (viewLevel === "tract" || viewLevel === "building");
+        // Read live store state (not stale closure) for initial visibility
+        const { showBuildings: sb, viewLevel: vl } = useMapStore.getState();
+        tileset.show = buildingsVisible(vl, sb);
       })
       .catch((err: unknown) => {
-        console.warn("OSM Buildings tileset failed (check Ion token):", err);
+        console.error("OSM Buildings tileset failed:", err);
+        const msg = err instanceof Error ? err.message : String(err);
+        setTilesetError(msg.includes("403")
+          ? "3D Buildings unavailable — go to ion.cesium.com and add asset 96188 to your account"
+          : `3D Buildings failed to load: ${msg}`
+        );
       });
 
     return () => {
@@ -177,11 +185,10 @@ export function CesiumMap() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Sync building visibility based on viewLevel + showBuildings toggle
+  // Sync building visibility: county/tract/building all get buildings when zoomed in
   useEffect(() => {
     if (tilesetRef.current) {
-      tilesetRef.current.show =
-        showBuildings && (viewLevel === "tract" || viewLevel === "building");
+      tilesetRef.current.show = buildingsVisible(viewLevel, showBuildings);
     }
   }, [showBuildings, viewLevel]);
 
@@ -295,17 +302,42 @@ export function CesiumMap() {
   }, [viewLevel, navigateToState, navigateToCounty, navigateToTract, navigateToBuilding]);
 
   return (
-    <div
-      ref={containerRef}
-      tabIndex={0}
-      style={{
-        width: "100%",
-        height: "100%",
-        position: "absolute",
-        top: 0,
-        left: 0,
-        outline: "none",
-      }}
-    />
+    <>
+      <div
+        ref={containerRef}
+        tabIndex={0}
+        style={{
+          width: "100%",
+          height: "100%",
+          position: "absolute",
+          top: 0,
+          left: 0,
+          outline: "none",
+        }}
+      />
+      {tilesetError && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: 24,
+            right: 16,
+            maxWidth: 340,
+            background: "rgba(30,10,10,0.92)",
+            border: "1px solid rgba(239,68,68,0.4)",
+            borderRadius: 8,
+            padding: "10px 14px",
+            color: "#fca5a5",
+            fontSize: 11,
+            fontFamily: "'Inter', system-ui, sans-serif",
+            lineHeight: 1.5,
+            backdropFilter: "blur(8px)",
+            zIndex: 10,
+          }}
+        >
+          <span style={{ fontWeight: 700, color: "#f87171" }}>3D Buildings: </span>
+          {tilesetError}
+        </div>
+      )}
+    </>
   );
 }
