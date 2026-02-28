@@ -16,7 +16,8 @@ import {
   PostProcessStage,
   Ion,
   Entity,
-  PointGraphics,
+  PointPrimitiveCollection,
+  type PointPrimitive,
   LabelGraphics,
   VerticalOrigin,
   HorizontalOrigin,
@@ -25,7 +26,7 @@ import {
   JulianDate,
   NearFarScalar,
   ExtrapolationType,
-  Rectangle,
+
   Cartographic,
   Matrix4,
   CloudCollection,
@@ -35,12 +36,15 @@ import type { TractProperties } from "../../types/tract";
 import type { BuildingProperties } from "../../types/building";
 import type { MunicipalityProperties } from "../../types/municipality";
 import { useMunicipalities } from "../../hooks/useMunicipalities";
+import { useBusinesses } from "../../hooks/useBusinesses";
 import { useMapStore } from "../../store/useMapStore";
 import { useChoropleth } from "../../hooks/useChoropleth";
 import { useSatellites } from "../../hooks/useSatellites";
 import { useFlights } from "../../hooks/useFlights";
 import type { FlightState } from "../../hooks/useFlights";
 import { useWeather } from "../../hooks/useWeather";
+import { useWeatherOverlay } from "../../hooks/useWeatherOverlay";
+import { useGeoJsonLayer } from "../../hooks/useGeoJsonLayer";
 import CesiumNavigation from "cesium-navigation-es6";
 
 // NJ centroid at state overview altitude
@@ -236,6 +240,7 @@ const trafficParticles: Array<{
   heading: number;
   segment: number[][]; // [lat, lon][]
   t: number; // progress along segment [0, 1]
+  roadType: string;
 }> = [];
 
 interface RoadSegment {
@@ -245,61 +250,94 @@ interface RoadSegment {
 
 const roadSegments: RoadSegment[] = [];
 
-// Remove hardcoded NJ_ROAD_LINES
+// Grid cell → particle count for density color computation (0.003° ≈ 330m cells)
+const DENSITY_CELL = 0.003;
+const densityGrid = new Map<string, number>();
+
+function gridKey(lat: number, lon: number) {
+  return `${Math.floor(lat / DENSITY_CELL)},${Math.floor(lon / DENSITY_CELL)}`;
+}
+
+function rebuildDensityGrid() {
+  densityGrid.clear();
+  for (const p of trafficParticles) {
+    const k = gridKey(p.lat, p.lon);
+    densityGrid.set(k, (densityGrid.get(k) ?? 0) + 1);
+  }
+}
+
+// Map density count to a CSS hex color: free → green, moderate → yellow, heavy → orange → red
+function densityColor(count: number): string {
+  if (count <= 2) return "#4ade80"; // green  — free flow
+  if (count <= 5) return "#facc15"; // yellow — light
+  if (count <= 9) return "#fb923c"; // orange — moderate
+  if (count <= 14) return "#f87171"; // red    — heavy
+  return "#dc2626";                  // dark red — gridlock
+}
 
 function lerpPoint(a: number[], b: number[], t: number) {
   return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
 }
 
-function initTrafficParticles(roads: RoadSegment[]) {
+interface TrafficOptions {
+  densityMult: number;
+  includeSecondary: boolean;
+}
+
+const MAX_TRAFFIC_PARTICLES = 600;
+
+function initTrafficParticles(roads: RoadSegment[], opts: TrafficOptions) {
   trafficParticles.length = 0;
   if (roads.length === 0) return;
 
-  // Use major roads only (motorway, primary)
-  const majorRoads = roads.filter(r => r.type === "motorway" || r.type === "primary");
-  if (majorRoads.length === 0) return;
+  const ROAD_SETTINGS: Record<string, { density: number; cap: number; speedMult: number }> = {
+    motorway: { density: 0.5, cap: 20, speedMult: 1.8 },
+    motorway_link: { density: 0.3, cap: 8, speedMult: 1.4 },
+    primary: { density: 0.25, cap: 10, speedMult: 1.0 },
+    primary_link: { density: 0.15, cap: 5, speedMult: 0.9 },
+    secondary: { density: 0.12, cap: 6, speedMult: 0.75 },
+    secondary_link: { density: 0.08, cap: 3, speedMult: 0.65 },
+  };
+
+  const allowedTypes = opts.includeSecondary
+    ? Object.keys(ROAD_SETTINGS)
+    : ["motorway", "motorway_link", "primary", "primary_link"];
+
+  const eligibleRoads = roads.filter(r => allowedTypes.includes(r.type));
+  if (eligibleRoads.length === 0) return;
 
   let id = 0;
-  const densityMap: Record<string, number> = {
-    motorway: 0.5,  // ~4x more than before
-    primary: 0.25,
-  };
-  const capMap: Record<string, number> = {
-    motorway: 20,
-    primary: 10,
-  };
-
-  majorRoads.forEach((road) => {
-    const density = densityMap[road.type] || 0.1;
-    const cap = capMap[road.type] || 6;
-    // Length approximation (sum of segment distances in degrees)
+  for (const road of eligibleRoads) {
+    const s = ROAD_SETTINGS[road.type] ?? { density: 0.08, cap: 3, speedMult: 0.7 };
     let length = 0;
     for (let i = 0; i < road.pts.length - 1; i++) {
       const dLat = road.pts[i + 1][0] - road.pts[i][0];
       const dLon = road.pts[i + 1][1] - road.pts[i][1];
       length += Math.sqrt(dLat * dLat + dLon * dLon);
     }
-
-    const count = Math.ceil(length * 1000 * density);
-    for (let i = 0; i < Math.min(count, cap); i++) {
+    const count = Math.ceil(length * 1000 * s.density * opts.densityMult);
+    for (let i = 0; i < Math.min(count, s.cap); i++) {
       const t = Math.random();
       const segIdx = Math.floor(Math.random() * (road.pts.length - 1));
       const p1 = road.pts[segIdx];
-      const p2 = road.pts[segIdx + 1];
+      const p2 = road.pts[segIdx + 1] ?? road.pts[segIdx];
       const pos = lerpPoint(p1, p2, t);
       const heading = Math.atan2(p2[1] - p1[1], p2[0] - p1[0]) * (180 / Math.PI);
-
+      if (trafficParticles.length >= MAX_TRAFFIC_PARTICLES) break;
       trafficParticles.push({
         id: `t${id++}`,
         lat: pos[0],
         lon: pos[1],
-        speed: (0.0002 + Math.random() * 0.0003) * (road.type === "motorway" ? 1.8 : 1.0),
+        speed: (0.0002 + Math.random() * 0.0003) * s.speedMult,
         heading,
         segment: road.pts,
         t,
+        roadType: road.type,
       });
     }
-  });
+    if (trafficParticles.length >= MAX_TRAFFIC_PARTICLES) break;
+  }
+  rebuildDensityGrid();
 }
 
 export function CesiumMap() {
@@ -308,6 +346,7 @@ export function CesiumMap() {
   const tilesetRef = useRef<Cesium3DTileset | null>(null);
   const cloudCollectionRef = useRef<CloudCollection | null>(null);
   const handlerRef = useRef<ScreenSpaceEventHandler | null>(null);
+  const bizHitTestRef = useRef<((lat: number, lon: number, threshold: number) => import("../../hooks/useBusinesses").BusinessFeature | null)>(() => null);
   const initDoneRef = useRef(false);
   const [tilesetError, setTilesetError] = useState<string | null>(null);
   const stagesRef = useRef<Record<string, PostProcessStage>>({});
@@ -315,7 +354,8 @@ export function CesiumMap() {
   const flightEntitiesRef = useRef<Map<string, Entity>>(new Map());
   const milEntitiesRef = useRef<Map<string, Entity>>(new Map());
   const cctvEntitiesRef = useRef<Map<string, Entity>>(new Map());
-  const trafficEntitiesRef = useRef<Map<string, Entity>>(new Map());
+  const trafficCollectionRef = useRef<PointPrimitiveCollection | null>(null);
+  const trafficPointsRef = useRef<PointPrimitive[]>([]);
   const trafficTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const roadsLoadedRef = useRef(false);
   const [activePOI, setActivePOI] = useState<string | null>(null);
@@ -334,23 +374,185 @@ export function CesiumMap() {
     navigateToState, navigateToCounty, navigateToTract, navigateToBuilding,
     showSatellites, showFlights, showMilitaryFlights, showTraffic,
     showCCTV,
+    trafficDensityMult, trafficShowSecondary, trafficMaxDistance, trafficParticleSize,
     detectionMode, setTrackedSatelliteId, setTrackedFlightIcao, setTrackedFlightData,
     trackedSatelliteId, trackedFlightIcao,
     viewPreset,
     isOrbitActive,
     skyMode,
     weatherData,
-    showMunicipalities, setSelectedMunicipality,
-    showLiveWeather,
+    showMunicipalities, setSelectedMunicipality, munChoroplethVar,
+    showBusinesses, setSelectedBusiness,
+    showWeatherOverlay, weatherOverlayMode,
+    flyToRequest, setFlyToRequest,
+    // Infrastructure layers
+    showElectricUtilities, showPowerPlants, showSolarGrid,
+    showSewerAreas, showPurveyorAreas,
+    showAfvStations, showCommunitySolar, showRggiInvestments,
+    showFloodZones,
+    showTransitRoutes, showTransitStops,
+    showEvStations,
   } = useMapStore();
 
-  // Weather polling hook
+  // Weather polling hook (point data for WeatherHUD)
   useWeather();
+
+  // Gridded weather overlay on the map
+  useWeatherOverlay({ viewer: viewerRef.current, mode: weatherOverlayMode, show: showWeatherOverlay });
+
+  // Fly-to requests from SearchBar / BusinessListPanel
+  useEffect(() => {
+    if (!flyToRequest) return;
+    const v = viewerRef.current;
+    if (!v) return;
+    v.camera.flyTo({
+      destination: Cartesian3.fromDegrees(flyToRequest.lon, flyToRequest.lat, flyToRequest.alt),
+      orientation: { heading: CesiumMath.toRadians(0), pitch: CesiumMath.toRadians(-35), roll: 0 },
+      duration: 2,
+    });
+    setFlyToRequest(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flyToRequest]);
 
   // --- Live data hooks ---
   const satellites = useSatellites(showSatellites, detectionMode);
   const flights = useFlights(showFlights);
   // Earthquakes removed
+
+  // ─── FEMA Flood Zones ─────────────────────────────────────────────────────
+  useGeoJsonLayer({
+    viewer: viewerRef.current, show: showFloodZones,
+    url: "/data/fema/flood_zones.geojson",
+    fill: Color.fromCssColorString("#38bdf8").withAlpha(0.22),
+    stroke: Color.fromCssColorString("#0ea5e9").withAlpha(0.7),
+    strokeWidth: 1,
+    onLoad: (ds) => {
+      // Color polygons by flood zone type
+      for (const entity of ds.entities.values) {
+        const props = entity.properties;
+        if (!entity.polygon || !props) continue;
+        const zone: string = props.FLD_ZONE?.getValue(null) ?? "";
+        let fill: Color;
+        if (zone.startsWith("A") || zone.startsWith("V")) {
+          fill = Color.fromCssColorString("#ef4444").withAlpha(0.35); // High risk
+        } else if (zone === "AE" || zone === "AH" || zone === "AO") {
+          fill = Color.fromCssColorString("#f97316").withAlpha(0.30); // Moderate
+        } else {
+          fill = Color.fromCssColorString("#a3e635").withAlpha(0.15); // Minimal/X
+        }
+        entity.polygon.material = new ColorMaterialProperty(fill) as unknown as import("cesium").MaterialProperty;
+        entity.polygon.outline = true as unknown as import("cesium").Property;
+        entity.polygon.outlineColor = Color.fromCssColorString("#0ea5e9").withAlpha(0.5) as unknown as import("cesium").Property;
+      }
+    },
+  });
+
+  // ─── Electric Grid ────────────────────────────────────────────────────────
+  useGeoJsonLayer({
+    viewer: viewerRef.current, show: showElectricUtilities,
+    url: "/data/njdep/electric_utilities.geojson",
+    fill: Color.fromCssColorString("#facc15").withAlpha(0.08),
+    stroke: Color.fromCssColorString("#facc15").withAlpha(0.6),
+    strokeWidth: 1.5,
+  });
+
+  useGeoJsonLayer({
+    viewer: viewerRef.current, show: showPowerPlants,
+    url: "/data/njdep/power_plants.geojson",
+    fill: Color.fromCssColorString("#fb923c").withAlpha(0.8),
+    stroke: Color.fromCssColorString("#ea580c").withAlpha(0.9),
+    strokeWidth: 2,
+    clampToGround: true,
+  });
+
+  useGeoJsonLayer({
+    viewer: viewerRef.current, show: showSolarGrid,
+    url: "/data/njdep/solar_grid_supply.geojson",
+    fill: Color.fromCssColorString("#fde68a").withAlpha(0.7),
+    stroke: Color.fromCssColorString("#f59e0b").withAlpha(0.8),
+    strokeWidth: 1,
+  });
+
+  // ─── Water & Sewage ───────────────────────────────────────────────────────
+  useGeoJsonLayer({
+    viewer: viewerRef.current, show: showSewerAreas,
+    url: "/data/njdep/sewer_service_areas.geojson",
+    fill: Color.fromCssColorString("#38bdf8").withAlpha(0.10),
+    stroke: Color.fromCssColorString("#0ea5e9").withAlpha(0.55),
+    strokeWidth: 1,
+  });
+
+  useGeoJsonLayer({
+    viewer: viewerRef.current, show: showPurveyorAreas,
+    url: "/data/njdep/purveyor_service_areas.geojson",
+    fill: Color.fromCssColorString("#67e8f9").withAlpha(0.10),
+    stroke: Color.fromCssColorString("#22d3ee").withAlpha(0.55),
+    strokeWidth: 1,
+  });
+
+  // ─── Climate & Energy ─────────────────────────────────────────────────────
+  useGeoJsonLayer({
+    viewer: viewerRef.current, show: showAfvStations,
+    url: "/data/njdep/afv_stations.geojson",
+    fill: Color.fromCssColorString("#86efac").withAlpha(0.8),
+    stroke: Color.fromCssColorString("#22c55e").withAlpha(0.9),
+    strokeWidth: 1.5,
+  });
+
+  useGeoJsonLayer({
+    viewer: viewerRef.current, show: showCommunitySolar,
+    url: "/data/njdep/community_solar.geojson",
+    fill: Color.fromCssColorString("#fde68a").withAlpha(0.15),
+    stroke: Color.fromCssColorString("#eab308").withAlpha(0.6),
+    strokeWidth: 1,
+  });
+
+  useGeoJsonLayer({
+    viewer: viewerRef.current, show: showRggiInvestments,
+    url: "/data/njdep/rggi_investments.geojson",
+    fill: Color.fromCssColorString("#a78bfa").withAlpha(0.7),
+    stroke: Color.fromCssColorString("#7c3aed").withAlpha(0.9),
+    strokeWidth: 2,
+  });
+
+  // ─── NJTransit ────────────────────────────────────────────────────────────
+  useGeoJsonLayer({
+    viewer: viewerRef.current, show: showTransitRoutes,
+    url: "/data/njtransit/routes.geojson",
+    fill: Color.TRANSPARENT,
+    stroke: Color.fromCssColorString("#f472b6").withAlpha(0.7),
+    strokeWidth: 2,
+    onLoad: (ds) => {
+      // Color rail vs bus routes differently
+      for (const entity of ds.entities.values) {
+        const props = entity.properties;
+        if (!entity.polyline || !props) continue;
+        const feed: string = props.feed?.getValue(null) ?? "";
+        const color = feed === "rail"
+          ? Color.fromCssColorString("#60a5fa").withAlpha(0.85)
+          : Color.fromCssColorString("#facc15").withAlpha(0.65);
+        entity.polyline.material = new ColorMaterialProperty(color) as unknown as import("cesium").MaterialProperty;
+        entity.polyline.width = (feed === "rail" ? 2.5 : 1.5) as unknown as import("cesium").Property;
+      }
+    },
+  });
+
+  useGeoJsonLayer({
+    viewer: viewerRef.current, show: showTransitStops,
+    url: "/data/njtransit/stops.geojson",
+    fill: Color.fromCssColorString("#e879f9").withAlpha(0.75),
+    stroke: Color.fromCssColorString("#a21caf").withAlpha(0.9),
+    strokeWidth: 1,
+  });
+
+  // ─── EV Charging Stations (NREL) ──────────────────────────────────────────
+  useGeoJsonLayer({
+    viewer: viewerRef.current, show: showEvStations,
+    url: "/data/nrel/ev_stations.geojson",
+    fill: Color.fromCssColorString("#4ade80").withAlpha(0.85),
+    stroke: Color.fromCssColorString("#16a34a").withAlpha(0.9),
+    strokeWidth: 1.5,
+  });
 
   // Initialize Cesium viewer once
   useEffect(() => {
@@ -435,6 +637,8 @@ export function CesiumMap() {
     }
 
     viewerRef.current = v;
+    // Expose for HUD components that need camera position
+    (window as any).__cesiumViewer = v;
 
     const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
     Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN ?? "";
@@ -538,7 +742,7 @@ export function CesiumMap() {
   // Sync Weather Data to Visuals
   useEffect(() => {
     const v = viewerRef.current;
-    if (!v || !showLiveWeather || !weatherData) {
+    if (!v || !weatherData) {
       if (cloudCollectionRef.current) cloudCollectionRef.current.removeAll();
       if (stagesRef.current.rain) stagesRef.current.rain.enabled = false;
       if (stagesRef.current.snow) stagesRef.current.snow.enabled = false;
@@ -586,7 +790,7 @@ export function CesiumMap() {
       fog.density = 0.001;
       if (skyAtmosphere) skyAtmosphere.saturationShift = -0.7;
     }
-  }, [weatherData, showLiveWeather]);
+  }, [weatherData]);
 
   // Keyboard: POI shortcuts (Q..T) and ESC to go back to state
   useEffect(() => {
@@ -679,7 +883,8 @@ export function CesiumMap() {
             outlineColor: Color.BLACK,
             outlineWidth: 1,
             scaleByDistance: new NearFarScalar(1e7, 1.0, 1e9, 0.2),
-          } as PointGraphics.ConstructorOptions,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          } as any,
           label: detectionMode === "sparse" ? {
             text: sat.name.substring(0, 14),
             font: "10px monospace",
@@ -847,7 +1052,8 @@ export function CesiumMap() {
           color: Color.fromCssColorString("#a855f7"),
           outlineColor: Color.WHITE,
           outlineWidth: 2,
-        } as PointGraphics.ConstructorOptions,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any,
         label: {
           text: `📹 ${cam.label}`,
           font: "bold 11px monospace",
@@ -864,18 +1070,24 @@ export function CesiumMap() {
     }
   }, [showCCTV]);
 
-  // Traffic particle boot
+  // Traffic particle boot — re-runs when settings change to rebuild particles
   useEffect(() => {
     const v = viewerRef.current;
     if (!v) return;
-    const existing = trafficEntitiesRef.current;
 
-    if (!showTraffic) {
-      existing.forEach((e) => v.entities.remove(e));
-      existing.clear();
+    const clearTraffic = () => {
       if (trafficTickRef.current) { clearInterval(trafficTickRef.current); trafficTickRef.current = null; }
-      return;
-    }
+      if (trafficCollectionRef.current && !v.isDestroyed()) {
+        v.scene.primitives.remove(trafficCollectionRef.current);
+      }
+      trafficCollectionRef.current = null;
+      trafficPointsRef.current = [];
+    };
+
+    if (!showTraffic) { clearTraffic(); return; }
+
+    const maxDistDeg = (trafficMaxDistance * 1000) / 111000; // approx degrees
+    const pixelSize = trafficParticleSize;
 
     const loadAndInit = async () => {
       if (!roadsLoadedRef.current) {
@@ -887,116 +1099,98 @@ export function CesiumMap() {
           data.features.forEach((f: any) => {
             if (f.geometry.type === "LineString") {
               roadSegments.push({
-                pts: f.geometry.coordinates.map((c: number[]) => [c[1], c[0]]), // lon/lat -> lat/lon
-                type: f.properties.highway
+                pts: f.geometry.coordinates.map((c: number[]) => [c[1], c[0]]),
+                type: f.properties.highway,
               });
             }
           });
           roadsLoadedRef.current = true;
-          initTrafficParticles(roadSegments);
         } catch (e) {
           console.error("Failed to load roads", e);
-        }
-      } else if (trafficParticles.length === 0) {
-        initTrafficParticles(roadSegments);
-      }
-
-      // Create entities once
-      if (existing.size === 0) {
-        for (const p of trafficParticles) {
-          const ent = v.entities.add({
-            id: `traf_${p.id}`,
-            position: Cartesian3.fromDegrees(p.lon, p.lat, 2),
-            point: {
-              pixelSize: 4,
-              color: Color.fromCssColorString("#facc15").withAlpha(0.9),
-              outlineColor: Color.fromCssColorString("#000000"),
-              outlineWidth: 1,
-              scaleByDistance: new NearFarScalar(100, 2.0, 8000, 0.4),
-              distanceDisplayCondition: { near: 0, far: 12000 },
-            } as PointGraphics.ConstructorOptions,
-          });
-          existing.set(p.id, ent);
+          return;
         }
       }
 
-      // Animate particles along their road paths
-      if (!trafficTickRef.current) {
-        trafficTickRef.current = setInterval(() => {
-          const vv = viewerRef.current;
-          if (!vv || vv.isDestroyed()) return;
+      // Rebuild simulation
+      clearTraffic();
+      initTrafficParticles(roadSegments, { densityMult: trafficDensityMult, includeSecondary: trafficShowSecondary });
 
-          // Optimization: Check camera height
-          const camHeight = vv.camera.positionCartographic.height;
-          if (camHeight > 30000) return; // Stop updates if too high
+      // Use PointPrimitiveCollection — GPU-instanced, far cheaper than Entity for many points
+      const collection = new PointPrimitiveCollection();
+      v.scene.primitives.add(collection);
+      trafficCollectionRef.current = collection;
 
-          const camPos = vv.camera.position;
+      const points: PointPrimitive[] = [];
+      const initColor = Color.fromCssColorString(densityColor(1)).withAlpha(0.92);
+      for (const p of trafficParticles) {
+        points.push(collection.add({
+          position: Cartesian3.fromDegrees(p.lon, p.lat, 2),
+          pixelSize,
+          color: initColor,
+          outlineColor: Color.fromCssColorString("#000000").withAlpha(0.4),
+          outlineWidth: 0.8,
+          scaleByDistance: new NearFarScalar(100, 2.2, 8000, 0.3),
+          distanceDisplayCondition: { near: 0, far: trafficMaxDistance * 1000 },
+        }));
+      }
+      trafficPointsRef.current = points;
 
-          // Compute camera view rectangle once per tick for despawn logic
-          const viewRect = vv.camera.computeViewRectangle(vv.scene.globe.ellipsoid);
+      // Animate + recolor
+      let densityTick = 0;
+      trafficTickRef.current = setInterval(() => {
+        const vv = viewerRef.current;
+        if (!vv || vv.isDestroyed()) return;
 
-          for (const p of trafficParticles) {
-            const pPos = Cartesian3.fromDegrees(p.lon, p.lat, 2);
+        const carto = vv.camera.positionCartographic;
+        if (carto.height > 35000) return;
 
-            // Only update particles within 12km of camera
-            const dist = Cartesian3.distance(camPos, pPos);
-            if (dist > 12000) continue;
+        const camLat = CesiumMath.toDegrees(carto.latitude);
+        const camLon = CesiumMath.toDegrees(carto.longitude);
+        const speedScale = useMapStore.getState().trafficSpeedMult;
+        const pts = trafficPointsRef.current;
 
-            p.t += p.speed * 4; // Move along segment
+        for (let i = 0; i < trafficParticles.length; i++) {
+          const p = trafficParticles[i];
 
-            if (p.t >= 1) {
-              p.t = 0;
-              // Only teleport to a new road when particle has left the camera view
-              if (viewRect) {
-                const carto = Cartographic.fromDegrees(p.lon, p.lat);
-                if (!Rectangle.contains(viewRect, carto)) {
-                  // Off-screen: find a visible road segment to respawn on
-                  let found = false;
-                  for (let attempt = 0; attempt < 40; attempt++) {
-                    const r = roadSegments[Math.floor(Math.random() * roadSegments.length)];
-                    if (r.pts.length < 2) continue;
-                    const mid = r.pts[Math.floor(r.pts.length / 2)];
-                    if (Rectangle.contains(viewRect, Cartographic.fromDegrees(mid[1], mid[0]))) {
-                      p.segment = r.pts;
-                      p.t = Math.random();
-                      found = true;
-                      break;
-                    }
-                  }
-                  if (!found) {
-                    // Fallback: any random road
-                    p.segment = roadSegments[Math.floor(Math.random() * roadSegments.length)].pts;
-                  }
-                }
-                // In-view: loop same segment from t=0 (already reset above)
-              } else {
-                // Can't compute view rect — old behaviour
-                p.segment = roadSegments[Math.floor(Math.random() * roadSegments.length)].pts;
-              }
-            }
+          // Fast bounding-box cull — avoid Cartesian3.distance per particle
+          if (Math.abs(p.lat - camLat) + Math.abs(p.lon - camLon) > maxDistDeg * 1.5) continue;
 
-            // Find current and next point in segment based on t
-            const segmentCount = p.segment.length - 1;
-            const floatIdx = p.t * segmentCount;
-            const idx = Math.floor(floatIdx);
-            const subT = floatIdx - idx;
+          p.t += p.speed * 4 * speedScale;
 
-            if (idx < segmentCount) {
-              const p1 = p.segment[idx];
-              const p2 = p.segment[idx + 1];
-              const pos = lerpPoint(p1, p2, subT);
-              p.lat = pos[0];
-              p.lon = pos[1];
-            }
-
-            const ent = trafficEntitiesRef.current.get(p.id);
-            if (ent) {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              (ent.position as any)?.setValue?.(Cartesian3.fromDegrees(p.lon, p.lat, 2));
-            }
+          if (p.t >= 1) {
+            p.t = 0;
+            // Reassign to a random road segment
+            const r = roadSegments[Math.floor(Math.random() * roadSegments.length)];
+            p.segment = r.pts;
+            p.t = Math.random();
           }
-        }, 60);
-      }
+
+          const segmentCount = p.segment.length - 1;
+          const floatIdx = p.t * segmentCount;
+          const idx = Math.floor(floatIdx);
+          const subT = floatIdx - idx;
+          if (idx < segmentCount) {
+            const p1 = p.segment[idx];
+            const p2 = p.segment[idx + 1];
+            p.lat = p1[0] + (p2[0] - p1[0]) * subT;
+            p.lon = p1[1] + (p2[1] - p1[1]) * subT;
+          }
+
+          // Direct assignment — no property-system overhead
+          pts[i].position = Cartesian3.fromDegrees(p.lon, p.lat, 2);
+        }
+
+        // Recolor every 5 ticks (~500ms at 100ms interval)
+        densityTick++;
+        if (densityTick % 5 === 0) {
+          rebuildDensityGrid();
+          for (let i = 0; i < trafficParticles.length; i++) {
+            const p = trafficParticles[i];
+            const count = densityGrid.get(gridKey(p.lat, p.lon)) ?? 1;
+            pts[i].color = Color.fromCssColorString(densityColor(count)).withAlpha(0.92);
+          }
+        }
+      }, 100);
     };
 
     loadAndInit();
@@ -1004,7 +1198,7 @@ export function CesiumMap() {
     return () => {
       if (trafficTickRef.current) { clearInterval(trafficTickRef.current); trafficTickRef.current = null; }
     };
-  }, [showTraffic]);
+  }, [showTraffic, trafficDensityMult, trafficShowSecondary, trafficMaxDistance, trafficParticleSize]);
 
   // Orbit mode — auto-rotate around a pivot point
   useEffect(() => {
@@ -1214,11 +1408,19 @@ export function CesiumMap() {
     }
   }, [viewPreset, isFlythroughActive]);
 
+  // Business pins overlay
+  const { hitTest: bizHitTest } = useBusinesses({
+    viewer: viewerRef.current,
+    show: showBusinesses,
+  });
+  bizHitTestRef.current = bizHitTest;
+
   // Municipality overlay
   const { entityMapRef: munEntityMapRef } = useMunicipalities({
     viewer: viewerRef.current,
     show: showMunicipalities,
     selectedMunGeoid: selectedMunicipalityProps?.mun_geoid ?? null,
+    munChoroplethVar,
   });
 
   // County/Tract choropleth
@@ -1296,6 +1498,25 @@ export function CesiumMap() {
         return;
       }
 
+      // Business pin hit test — PointPrimitive collections report the collection as `picked`,
+      // so we do a ground-position proximity test instead
+      if (useMapStore.getState().showBusinesses) {
+        const groundPos = v.camera.pickEllipsoid(e.position, v.scene.globe.ellipsoid);
+        if (groundPos) {
+          const carto = Cartographic.fromCartesian(groundPos);
+          const lat = CesiumMath.toDegrees(carto.latitude);
+          const lon = CesiumMath.toDegrees(carto.longitude);
+          const camH = v.camera.positionCartographic.height;
+          // threshold ≈ 0.5% of camera altitude in degrees
+          const threshold = Math.max(0.0003, (camH / 111000) * 0.005);
+          const biz = bizHitTestRef.current(lat, lon, threshold);
+          if (biz) {
+            setSelectedBusiness(biz);
+            return;
+          }
+        }
+      }
+
       // Entity click
       const entity = picked?.id as EntityWithData | undefined;
       if (!entity) return;
@@ -1350,7 +1571,7 @@ export function CesiumMap() {
       if (!handler.isDestroyed()) handler.destroy();
       handlerRef.current = null;
     };
-  }, [viewLevel, navigateToState, navigateToCounty, navigateToTract, navigateToBuilding, setTrackedSatelliteId, setTrackedFlightIcao, setTrackedFlightData, setSelectedMunicipality]);
+  }, [viewLevel, navigateToState, navigateToCounty, navigateToTract, navigateToBuilding, setTrackedSatelliteId, setTrackedFlightIcao, setTrackedFlightData, setSelectedMunicipality, setSelectedBusiness]);
 
   return (
     <>

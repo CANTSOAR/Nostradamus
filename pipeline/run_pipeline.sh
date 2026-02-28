@@ -84,3 +84,30 @@ echo "Pipeline complete."
 echo "  Tract output:  ../frontend/public/data/nj_tracts_enriched.geojson"
 echo "  County output: ../frontend/public/data/nj_counties_enriched.geojson"
 echo "  Roads output:  ../frontend/public/data/nj_roads.geojson"
+
+echo ""
+echo "=== Fetch NJDEP Infrastructure Data (Grid, Water, Climate) ==="
+python fetch_njdep.py
+
+echo ""
+echo "=== Fetch FEMA Flood Zones ==="
+python fetch_fema.py
+
+echo ""
+echo "=== Fetch NREL EV Charging Stations ==="
+python fetch_nrel.py
+
+echo ""
+echo "=== Fetch NJTransit GTFS (Bus + Rail) ==="
+python fetch_njtransit.py
+
+echo ""
+echo "=== Fetch EIA Electricity Load/Generation ==="
+python fetch_eia.py
+
+echo ""
+echo "Infrastructure pipeline complete."
+echo "  Copy to frontend: rsync -av data/njdep/ ../frontend/public/data/njdep/"
+echo "                    rsync -av data/fema/  ../frontend/public/data/fema/"
+echo "                    rsync -av data/nrel/  ../frontend/public/data/nrel/"
+echo "                    rsync -av data/njtransit/ ../frontend/public/data/njtransit/"

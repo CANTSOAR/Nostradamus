@@ -45,12 +45,27 @@ interface MapStore {
   activeVariable: VariableKey;
   setActiveVariable: (v: VariableKey) => void;
 
-  // --- Municipality inspect ---
+  // --- Municipality inspect + choropleth ---
   selectedMunicipalityProps: MunicipalityProperties | null;
   setSelectedMunicipality: (props: MunicipalityProperties | null) => void;
 
   showMunicipalities: boolean;
   toggleMunicipalities: () => void;
+
+  munChoroplethVar: string | null;
+  setMunChoroplethVar: (v: string | null) => void;
+
+  // --- Traffic simulation settings ---
+  trafficSpeedMult: number;       // 0.25 – 4.0
+  setTrafficSpeedMult: (v: number) => void;
+  trafficDensityMult: number;     // 0.25 – 3.0
+  setTrafficDensityMult: (v: number) => void;
+  trafficShowSecondary: boolean;
+  toggleTrafficShowSecondary: () => void;
+  trafficMaxDistance: number;     // km, 3 – 20
+  setTrafficMaxDistance: (v: number) => void;
+  trafficParticleSize: number;    // px, 2 – 10
+  setTrafficParticleSize: (v: number) => void;
 
   // --- Layer toggles ---
   showBuildings: boolean;
@@ -73,6 +88,55 @@ interface MapStore {
 
   showCCTV: boolean;
   toggleCCTV: () => void;
+
+  // --- Infrastructure: Electric Grid ---
+  showElectricUtilities: boolean;
+  toggleElectricUtilities: () => void;
+  showPowerPlants: boolean;
+  togglePowerPlants: () => void;
+  showSolarGrid: boolean;
+  toggleSolarGrid: () => void;
+
+  // --- Infrastructure: Water & Sewage ---
+  showSewerAreas: boolean;
+  toggleSewerAreas: () => void;
+  showPurveyorAreas: boolean;
+  togglePurveyorAreas: () => void;
+
+  // --- Climate & Energy ---
+  showAfvStations: boolean;
+  toggleAfvStations: () => void;
+  showCommunitySolar: boolean;
+  toggleCommunitySolar: () => void;
+  showRggiInvestments: boolean;
+  toggleRggiInvestments: () => void;
+
+  // --- FEMA Flood Zones ---
+  showFloodZones: boolean;
+  toggleFloodZones: () => void;
+
+  // --- NJTransit ---
+  showTransitRoutes: boolean;
+  toggleTransitRoutes: () => void;
+  showTransitStops: boolean;
+  toggleTransitStops: () => void;
+
+  // --- EV Charging Stations (NREL) ---
+  showEvStations: boolean;
+  toggleEvStations: () => void;
+
+  // --- Business pins ---
+  showBusinesses: boolean;
+  toggleBusinesses: () => void;
+  selectedBusiness: { name: string; type: string; category: string; lat: number; lon: number } | null;
+  setSelectedBusiness: (b: { name: string; type: string; category: string; lat: number; lon: number } | null) => void;
+
+  showBusinessList: boolean;
+  toggleBusinessList: () => void;
+
+  // --- Fly-to request (set by SearchBar / BusinessList, consumed by CesiumMap) ---
+  flyToRequest: { lat: number; lon: number; alt: number; label: string } | null;
+  setFlyToRequest: (req: { lat: number; lon: number; alt: number; label: string } | null) => void;
 
   // --- Detection mode ---
   detectionMode: "sparse" | "full";
@@ -103,8 +167,10 @@ interface MapStore {
   // --- Weather ---
   weatherData: WeatherData | null;
   setWeatherData: (data: WeatherData | null) => void;
-  showLiveWeather: boolean;
-  toggleLiveWeather: () => void;
+  showWeatherOverlay: boolean;
+  weatherOverlayMode: "temperature" | "wind" | "clouds";
+  setWeatherOverlayMode: (m: "temperature" | "wind" | "clouds") => void;
+  toggleWeatherOverlay: () => void;
 
   // --- Flythrough ---
   isFlythroughActive: boolean;
@@ -119,9 +185,13 @@ interface MapStore {
   setViewPreset: (p: "default" | "panoptic" | "tactical") => void;
 
   // Future seam for Rust ABM — add simulation state here
-  // simulationRunning: boolean;
-  // agentCount: number;
-  // tick: number;
+  simulationRunning: boolean;
+  agentCount: number;
+  tick: number;
+
+  startSimulation: () => void;
+  stopSimulation: () => void;
+  updateSimulation: (agents: number, tick: number) => void;
 }
 
 export const useMapStore = create<MapStore>((set) => ({
@@ -172,6 +242,20 @@ export const useMapStore = create<MapStore>((set) => ({
   showMunicipalities: true,
   toggleMunicipalities: () => set((s) => ({ showMunicipalities: !s.showMunicipalities })),
 
+  munChoroplethVar: null,
+  setMunChoroplethVar: (v) => set({ munChoroplethVar: v }),
+
+  trafficSpeedMult: 1.0,
+  setTrafficSpeedMult: (v) => set({ trafficSpeedMult: v }),
+  trafficDensityMult: 1.0,
+  setTrafficDensityMult: (v) => set({ trafficDensityMult: v }),
+  trafficShowSecondary: true,
+  toggleTrafficShowSecondary: () => set((s) => ({ trafficShowSecondary: !s.trafficShowSecondary })),
+  trafficMaxDistance: 12,
+  setTrafficMaxDistance: (v) => set({ trafficMaxDistance: v }),
+  trafficParticleSize: 4,
+  setTrafficParticleSize: (v) => set({ trafficParticleSize: v }),
+
   showBuildings: true,
   toggleBuildings: () => set((s) => ({ showBuildings: !s.showBuildings })),
 
@@ -192,6 +276,47 @@ export const useMapStore = create<MapStore>((set) => ({
 
   showCCTV: false,
   toggleCCTV: () => set((s) => ({ showCCTV: !s.showCCTV })),
+
+  showElectricUtilities: false,
+  toggleElectricUtilities: () => set((s) => ({ showElectricUtilities: !s.showElectricUtilities })),
+  showPowerPlants: false,
+  togglePowerPlants: () => set((s) => ({ showPowerPlants: !s.showPowerPlants })),
+  showSolarGrid: false,
+  toggleSolarGrid: () => set((s) => ({ showSolarGrid: !s.showSolarGrid })),
+
+  showSewerAreas: false,
+  toggleSewerAreas: () => set((s) => ({ showSewerAreas: !s.showSewerAreas })),
+  showPurveyorAreas: false,
+  togglePurveyorAreas: () => set((s) => ({ showPurveyorAreas: !s.showPurveyorAreas })),
+
+  showAfvStations: false,
+  toggleAfvStations: () => set((s) => ({ showAfvStations: !s.showAfvStations })),
+  showCommunitySolar: false,
+  toggleCommunitySolar: () => set((s) => ({ showCommunitySolar: !s.showCommunitySolar })),
+  showRggiInvestments: false,
+  toggleRggiInvestments: () => set((s) => ({ showRggiInvestments: !s.showRggiInvestments })),
+
+  showFloodZones: false,
+  toggleFloodZones: () => set((s) => ({ showFloodZones: !s.showFloodZones })),
+
+  showTransitRoutes: false,
+  toggleTransitRoutes: () => set((s) => ({ showTransitRoutes: !s.showTransitRoutes })),
+  showTransitStops: false,
+  toggleTransitStops: () => set((s) => ({ showTransitStops: !s.showTransitStops })),
+
+  showEvStations: false,
+  toggleEvStations: () => set((s) => ({ showEvStations: !s.showEvStations })),
+
+  showBusinesses: false,
+  toggleBusinesses: () => set((s) => ({ showBusinesses: !s.showBusinesses })),
+  selectedBusiness: null,
+  setSelectedBusiness: (b) => set({ selectedBusiness: b }),
+
+  showBusinessList: false,
+  toggleBusinessList: () => set((s) => ({ showBusinessList: !s.showBusinessList })),
+
+  flyToRequest: null,
+  setFlyToRequest: (req) => set({ flyToRequest: req }),
 
   detectionMode: "sparse",
   setDetectionMode: (m) => set({ detectionMode: m }),
@@ -217,8 +342,10 @@ export const useMapStore = create<MapStore>((set) => ({
 
   weatherData: null,
   setWeatherData: (data) => set({ weatherData: data }),
-  showLiveWeather: false,
-  toggleLiveWeather: () => set((s) => ({ showLiveWeather: !s.showLiveWeather })),
+  showWeatherOverlay: false,
+  weatherOverlayMode: "temperature",
+  setWeatherOverlayMode: (m) => set({ weatherOverlayMode: m }),
+  toggleWeatherOverlay: () => set((s) => ({ showWeatherOverlay: !s.showWeatherOverlay })),
 
   isFlythroughActive: false,
   toggleFlythrough: () => set((s) => ({ isFlythroughActive: !s.isFlythroughActive, isOrbitActive: false })),
@@ -228,6 +355,14 @@ export const useMapStore = create<MapStore>((set) => ({
 
   viewPreset: "default",
   setViewPreset: (p) => set({ viewPreset: p }),
+
+  simulationRunning: false,
+  agentCount: 0,
+  tick: 0,
+
+  startSimulation: () => set({ simulationRunning: true, tick: 0, agentCount: Math.floor(Math.random() * 50) + 10 }),
+  stopSimulation: () => set({ simulationRunning: false, tick: 0, agentCount: 0 }),
+  updateSimulation: (agents, tick) => set({ agentCount: agents, tick: tick }),
 }));
 
 
