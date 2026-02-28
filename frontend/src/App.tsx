@@ -10,7 +10,6 @@ import { ViewSelector } from "./components/ViewSelector";
 import { FlightInfoPanel } from "./components/FlightInfoPanel";
 import { MunicipalitySidebar } from "./components/MunicipalitySidebar";
 import { SkyModeSelector } from "./components/SkyModeSelector";
-import { WeatherHUD } from "./components/WeatherHUD";
 
 const panelStyle: React.CSSProperties = {
   background: "rgba(15,20,30,0.85)",
@@ -30,7 +29,6 @@ export default function App() {
     <div style={{ width: "100vw", height: "100vh", position: "relative", background: "#020408" }}>
       {/* Globe fills entire viewport */}
       <CesiumMap />
-      <WeatherHUD />
 
       {/* Panoptic HUD Overlays removed */}
 

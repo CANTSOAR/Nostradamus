@@ -28,8 +28,6 @@ import {
   Rectangle,
   Cartographic,
   Matrix4,
-  CloudCollection,
-  CloudType,
 } from "cesium";
 import type { TractProperties } from "../../types/tract";
 import type { BuildingProperties } from "../../types/building";
@@ -40,7 +38,6 @@ import { useChoropleth } from "../../hooks/useChoropleth";
 import { useSatellites } from "../../hooks/useSatellites";
 import { useFlights } from "../../hooks/useFlights";
 import type { FlightState } from "../../hooks/useFlights";
-import { useWeather } from "../../hooks/useWeather";
 import CesiumNavigation from "cesium-navigation-es6";
 
 // NJ centroid at state overview altitude
@@ -170,47 +167,6 @@ const SHADERS = {
       out_FragColor = vec4(color.rgb, 1.0);
     }
   `,
-  rain: `
-    uniform sampler2D colorTexture;
-    uniform float u_intensity;
-    in vec2 v_textureCoordinates;
-    float hash(float n) { return fract(sin(n) * 43758.5453); }
-    void main() {
-      vec4 color = texture(colorTexture, v_textureCoordinates);
-      vec2 uv = v_textureCoordinates;
-      float time = czm_frameNumber * 0.1;
-      float rain = 0.0;
-      for(int i=0; i<3; i++) {
-        vec2 rv = uv + vec2(0.0, time * (1.0 + float(i)*0.2));
-        rv.x *= 100.0;
-        rv.y *= 20.0;
-        if(hash(floor(rv.x) + floor(rv.y)*10.0) > (1.0 - u_intensity * 0.1)) {
-           rain += 0.2;
-        }
-      }
-      out_FragColor = mix(color, vec4(0.7, 0.7, 0.8, 1.0), rain * u_intensity);
-    }
-  `,
-  snow: `
-    uniform sampler2D colorTexture;
-    uniform float u_intensity;
-    in vec2 v_textureCoordinates;
-    float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-    void main() {
-      vec4 color = texture(colorTexture, v_textureCoordinates);
-      vec2 uv = v_textureCoordinates;
-      float time = czm_frameNumber * 0.02;
-      float snow = 0.0;
-      for(int i=0; i<5; i++) {
-        vec2 p = uv + vec2(sin(time + float(i)), time * (0.5 + float(i)*0.1));
-        p *= (20.0 + float(i)*10.0);
-        if(hash(floor(p)) > (0.99 - u_intensity * 0.01)) {
-          snow += 0.5;
-        }
-      }
-      out_FragColor = mix(color, vec4(1.0, 1.0, 1.0, 1.0), snow * u_intensity);
-    }
-  `
 };
 
 function extractBuildingProps(feature: Cesium3DTileFeature): BuildingProperties {
@@ -306,7 +262,6 @@ export function CesiumMap() {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<Viewer | null>(null);
   const tilesetRef = useRef<Cesium3DTileset | null>(null);
-  const cloudCollectionRef = useRef<CloudCollection | null>(null);
   const handlerRef = useRef<ScreenSpaceEventHandler | null>(null);
   const initDoneRef = useRef(false);
   const [tilesetError, setTilesetError] = useState<string | null>(null);
@@ -339,13 +294,9 @@ export function CesiumMap() {
     viewPreset,
     isOrbitActive,
     skyMode,
-    weatherData,
     showMunicipalities, setSelectedMunicipality,
-    showLiveWeather,
   } = useMapStore();
 
-  // Weather polling hook
-  useWeather();
 
   // --- Live data hooks ---
   const satellites = useSatellites(showSatellites, detectionMode);
@@ -460,14 +411,9 @@ export function CesiumMap() {
         setTilesetError(
           msg.includes("403") || msg.includes("401")
             ? "Ensure VITE_GOOGLE_MAPS_API_KEY is set in .env with Map Tiles API enabled"
-            : `Photorealistic 3D Tiles failed: ${msg}`
+            : `Photorealistic 3D Tiles failed: ${msg} `
         );
       });
-
-    // Cloud Collection init
-    const clouds = new CloudCollection();
-    v.scene.primitives.add(clouds);
-    cloudCollectionRef.current = clouds;
 
     return () => {
       if (!v.isDestroyed()) v.destroy();
@@ -535,58 +481,6 @@ export function CesiumMap() {
     }
   }, [skyMode]);
 
-  // Sync Weather Data to Visuals
-  useEffect(() => {
-    const v = viewerRef.current;
-    if (!v || !showLiveWeather || !weatherData) {
-      if (cloudCollectionRef.current) cloudCollectionRef.current.removeAll();
-      if (stagesRef.current.rain) stagesRef.current.rain.enabled = false;
-      if (stagesRef.current.snow) stagesRef.current.snow.enabled = false;
-      return;
-    }
-
-    // 1. Clouds
-    const clouds = cloudCollectionRef.current;
-    if (clouds) {
-      clouds.removeAll();
-      const count = Math.floor(weatherData.cloudCover / 10);
-      for (let i = 0; i < count; i++) {
-        clouds.add({
-          position: Cartesian3.fromDegrees(
-            -74.4057 + (Math.random() - 0.5) * 0.5,
-            40.0583 + (Math.random() - 0.5) * 0.5,
-            2000 + Math.random() * 1000
-          ),
-          maximumSize: new Cartesian3(800, 300, 400),
-          slice: Math.random(),
-          cloudType: CloudType.CUMULUS,
-        });
-      }
-    }
-
-    // 2. Precipitation
-    const isRain = weatherData.condition.includes("Rain") || weatherData.condition.includes("Drizzle") || weatherData.condition.includes("Showers");
-    const isSnow = weatherData.condition.includes("Snow");
-
-    if (stagesRef.current.rain) {
-      stagesRef.current.rain.enabled = isRain;
-      // @ts-ignore
-      stagesRef.current.rain.uniforms.u_intensity = Math.min(weatherData.precipitation * 2, 1.0);
-    }
-    if (stagesRef.current.snow) {
-      stagesRef.current.snow.enabled = isSnow;
-      // @ts-ignore
-      stagesRef.current.snow.uniforms.u_intensity = Math.min(weatherData.precipitation * 2, 1.0);
-    }
-
-    // 3. Sky Adjustments
-    const { scene } = v;
-    const { skyAtmosphere, fog } = scene;
-    if (weatherData.cloudCover > 50) {
-      fog.density = 0.001;
-      if (skyAtmosphere) skyAtmosphere.saturationShift = -0.7;
-    }
-  }, [weatherData, showLiveWeather]);
 
   // Keyboard: POI shortcuts (Q..T) and ESC to go back to state
   useEffect(() => {
@@ -671,7 +565,7 @@ export function CesiumMap() {
         (ent.position as any)?.setValue?.(pos);
       } else {
         const ent = v.entities.add({
-          id: `sat_${sat.id}`,
+          id: `sat_${sat.id} `,
           position: pos,
           point: {
             pixelSize: isTracked ? 10 : (detectionMode === "sparse" ? 5 : 3),
@@ -743,7 +637,7 @@ export function CesiumMap() {
         // Position updated via sampled property
       } else {
         const ent = v.entities.add({
-          id: `flt_${fl.icao24}`,
+          id: `flt_${fl.icao24} `,
           position: sampled,
           billboard: {
             image: PLANE_ICON,
@@ -797,7 +691,7 @@ export function CesiumMap() {
       if (existing.has(mil.icao24)) continue;
       const pos = Cartesian3.fromDegrees(mil.lon, mil.lat, mil.altitude);
       const ent = v.entities.add({
-        id: `mil_${mil.icao24}`,
+        id: `mil_${mil.icao24} `,
         position: pos,
         billboard: {
           image: PLANE_ICON,
@@ -840,7 +734,7 @@ export function CesiumMap() {
 
     for (const cam of NJ_CCTV) {
       const ent = v.entities.add({
-        id: `cctv_${cam.id}`,
+        id: `cctv_${cam.id} `,
         position: Cartesian3.fromDegrees(cam.lon, cam.lat, 20),
         point: {
           pixelSize: 12,
@@ -849,7 +743,7 @@ export function CesiumMap() {
           outlineWidth: 2,
         } as PointGraphics.ConstructorOptions,
         label: {
-          text: `📹 ${cam.label}`,
+          text: `📹 ${cam.label} `,
           font: "bold 11px monospace",
           fillColor: Color.fromCssColorString("#d8b4fe"),
           outlineColor: Color.BLACK,
@@ -905,7 +799,7 @@ export function CesiumMap() {
       if (existing.size === 0) {
         for (const p of trafficParticles) {
           const ent = v.entities.add({
-            id: `traf_${p.id}`,
+            id: `traf_${p.id} `,
             position: Cartesian3.fromDegrees(p.lon, p.lat, 2),
             point: {
               pixelSize: 4,
@@ -1122,6 +1016,7 @@ export function CesiumMap() {
         canvas.addEventListener("click", onCanvasClick);
 
         const LOOK_SENS = 0.003;
+        const ROLL_SENS = 0.02;
         const SPEED_NORMAL = 3;  // m/frame
         const SPEED_FAST = 15;   // m/frame with Shift
 
@@ -1137,6 +1032,8 @@ export function CesiumMap() {
           if (keysHeld.has("d")) v.camera.moveRight(speed);
           if (keysHeld.has(" ")) v.camera.moveUp(speed);
           if (keysHeld.has("c")) v.camera.moveDown(speed);
+          if (keysHeld.has("q")) v.camera.twistLeft(ROLL_SENS);
+          if (keysHeld.has("e")) v.camera.twistRight(ROLL_SENS);
 
           if (mouseAccum.dx !== 0 || mouseAccum.dy !== 0) {
             v.camera.lookRight(mouseAccum.dx * LOOK_SENS);
@@ -1402,7 +1299,7 @@ export function CesiumMap() {
           <span style={{ color: "#475569" }}>·</span>
           <span style={{ color: "#64748b" }}>Click map = capture mouse</span>
           <span style={{ color: "#475569" }}>·</span>
-          <span style={{ color: "#64748b" }}>WASD = move · Space/C = up/down · Shift = fast</span>
+          <span style={{ color: "#64748b" }}>WASD = move · Q/E = roll · Space/C = up/down · Shift = fast</span>
           <span style={{ color: "#475569" }}>·</span>
           <span style={{ color: "#64748b" }}>ESC = exit</span>
         </div>
@@ -1441,13 +1338,13 @@ export function CesiumMap() {
         </div>
       )}
       <style>{`
-        @keyframes poi-fade {
-          0% { opacity: 0; transform: translate(-50%,-50%) scale(1.5); }
-          15% { opacity: 1; transform: translate(-50%,-50%) scale(1); }
-          70% { opacity: 1; }
-          100% { opacity: 0; }
-        }
-      `}</style>
+@keyframes poi - fade {
+  0 % { opacity: 0; transform: translate(-50 %, -50 %) scale(1.5); }
+  15 % { opacity: 1; transform: translate(-50 %, -50 %) scale(1); }
+  70 % { opacity: 1; }
+  100 % { opacity: 0; }
+}
+`}</style>
     </>
   );
 }

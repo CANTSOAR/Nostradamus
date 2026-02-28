@@ -18,14 +18,6 @@ export interface TrackedFlightInfo {
   isMilitary: boolean;
 }
 
-export interface WeatherData {
-  temp: number;
-  windSpeed: number;
-  windDirection: number;
-  cloudCover: number;
-  precipitation: number; // mm
-  condition: string;
-}
 
 interface MapStore {
   // --- Navigation ---
@@ -99,12 +91,6 @@ interface MapStore {
   // --- Sky Mode ---
   skyMode: SkyMode;
   setSkyMode: (mode: SkyMode) => void;
-
-  // --- Weather ---
-  weatherData: WeatherData | null;
-  setWeatherData: (data: WeatherData | null) => void;
-  showLiveWeather: boolean;
-  toggleLiveWeather: () => void;
 
   // --- Flythrough ---
   isFlythroughActive: boolean;
@@ -214,11 +200,6 @@ export const useMapStore = create<MapStore>((set) => ({
 
   skyMode: "sunny",
   setSkyMode: (mode) => set({ skyMode: mode }),
-
-  weatherData: null,
-  setWeatherData: (data) => set({ weatherData: data }),
-  showLiveWeather: false,
-  toggleLiveWeather: () => set((s) => ({ showLiveWeather: !s.showLiveWeather })),
 
   isFlythroughActive: false,
   toggleFlythrough: () => set((s) => ({ isFlythroughActive: !s.isFlythroughActive, isOrbitActive: false })),
