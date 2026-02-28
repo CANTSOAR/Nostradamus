@@ -13,9 +13,11 @@ import {
   defined,
   Cesium3DTileFeature,
   HeadingPitchRange,
+  createOsmBuildingsAsync,
   type Entity,
 } from "cesium";
 import type { TractProperties } from "../../types/tract";
+import type { BuildingProperties } from "../../types/building";
 import { useMapStore } from "../../store/useMapStore";
 import { useChoropleth } from "../../hooks/useChoropleth";
 
@@ -28,9 +30,24 @@ interface EntityWithData extends Entity {
   _featureData?: FeatureData;
 }
 
-// Buildings are visible at county zoom level and closer
+// Buildings visible at county zoom level and closer
 function buildingsVisible(viewLevel: string, showBuildings: boolean) {
   return showBuildings && viewLevel !== "state";
+}
+
+// Extract typed building properties from a picked 3D tile feature
+function extractBuildingProps(feature: Cesium3DTileFeature): BuildingProperties {
+  const get = (key: string) => feature.getProperty(key);
+  const height = get("cesium#estimatedHeight");
+  return {
+    buildingType: get("building") ?? null,
+    levels: get("building:levels") != null ? Number(get("building:levels")) : null,
+    material: get("building:material") ?? null,
+    name: get("name") ?? null,
+    estimatedHeight: height != null ? Math.round(Number(height)) : null,
+    lat: get("cesium#latitude") != null ? Number(get("cesium#latitude")) : null,
+    lon: get("cesium#longitude") != null ? Number(get("cesium#longitude")) : null,
+  };
 }
 
 export function CesiumMap() {
@@ -74,25 +91,20 @@ export function CesiumMap() {
       creditContainer: creditDiv,
     });
 
-    // Fix zoom/pan — explicitly enable all camera controls
+    // Ensure all camera controls work
     v.scene.screenSpaceCameraController.enableZoom = true;
     v.scene.screenSpaceCameraController.enableRotate = true;
     v.scene.screenSpaceCameraController.enableTilt = true;
     v.scene.screenSpaceCameraController.enableTranslate = true;
 
-    // Dark background
     v.scene.backgroundColor = Color.fromCssColorString("#020408");
-
-    // Atmosphere — blue-shifted dark look
     v.scene.skyAtmosphere.hueShift = 0.3;
     v.scene.skyAtmosphere.saturationShift = 0.3;
     v.scene.skyAtmosphere.brightnessShift = -0.3;
-
     v.scene.globe.enableLighting = true;
     v.scene.globe.showGroundAtmosphere = true;
     v.scene.fog.enabled = true;
 
-    // Post-processing — subtle cyberpunk glow
     v.scene.postProcessStages.fxaa.enabled = true;
     const bloom = v.scene.postProcessStages.bloom;
     bloom.enabled = true;
@@ -109,18 +121,18 @@ export function CesiumMap() {
     // @ts-expect-error
     bloom.uniforms.stepSize = 1.0;
 
-    // Remove the default Bing Maps layer synchronously so no bad layer
-    // exists when Cesium renders its first frame (prevents queueReprojectionCommands crash)
+    // Remove default Bing Maps layer synchronously so first frame doesn't crash
     v.imageryLayers.removeAll();
 
-    // Satellite imagery via Ion asset 2 (Cesium World Imagery)
+    // Satellite imagery — Ion asset 2 (Cesium World Imagery)
     IonImageryProvider.fromAssetId(2)
       .then((provider) => {
+        if (v.isDestroyed()) return;
         v.imageryLayers.removeAll();
         v.imageryLayers.addImageryProvider(provider);
       })
       .catch(() => {
-        // Ion unavailable — fall back to OSM
+        if (v.isDestroyed()) return;
         v.imageryLayers.addImageryProvider(
           new OpenStreetMapImageryProvider({
             url: "https://tile.openstreetmap.org/",
@@ -142,17 +154,20 @@ export function CesiumMap() {
 
     viewerRef.current = v;
 
-    // OSM 3D Buildings — Cesium Ion asset 96188
-    // Note: asset 96188 must be added to your Ion account at ion.cesium.com
-    Cesium3DTileset.fromIonAssetId(96188)
+    // OSM 3D Buildings via createOsmBuildingsAsync (Cesium-recommended API)
+    // Requires asset 96188 in your Ion account at ion.cesium.com
+    createOsmBuildingsAsync()
       .then((tileset) => {
+        // Guard: viewer may have been destroyed by React StrictMode cleanup
+        if (v.isDestroyed() || viewerRef.current !== v) {
+          return;
+        }
+
         tilesetRef.current = tileset;
         v.scene.primitives.add(tileset);
-
-        // Improve tile loading performance
         tileset.maximumScreenSpaceError = 16;
 
-        // Dark cyberpunk building style
+        // Dark cyberpunk style: color by height
         tileset.style = new Cesium3DTileStyle({
           color: {
             conditions: [
@@ -164,35 +179,39 @@ export function CesiumMap() {
           },
         });
 
-        // Read live store state (not stale closure) for initial visibility
+        // Use live store state (not stale closure) for initial visibility
         const { showBuildings: sb, viewLevel: vl } = useMapStore.getState();
         tileset.show = buildingsVisible(vl, sb);
+        setTilesetError(null);
       })
       .catch((err: unknown) => {
+        if (v.isDestroyed() || viewerRef.current !== v) return;
         console.error("OSM Buildings tileset failed:", err);
         const msg = err instanceof Error ? err.message : String(err);
-        setTilesetError(msg.includes("403")
-          ? "3D Buildings unavailable — go to ion.cesium.com and add asset 96188 to your account"
-          : `3D Buildings failed to load: ${msg}`
+        setTilesetError(
+          msg.includes("403") || msg.includes("401")
+            ? "Go to ion.cesium.com → My Assets → search 'OSM Buildings' → Add to my assets"
+            : `3D Buildings failed: ${msg}`
         );
       });
 
     return () => {
       if (!v.isDestroyed()) v.destroy();
       viewerRef.current = null;
+      tilesetRef.current = null;
       initDoneRef.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Sync building visibility: county/tract/building all get buildings when zoomed in
+  // Sync building visibility when viewLevel or toggle changes
   useEffect(() => {
     if (tilesetRef.current) {
       tilesetRef.current.show = buildingsVisible(viewLevel, showBuildings);
     }
   }, [showBuildings, viewLevel]);
 
-  // County choropleth (visible at state level)
+  // County choropleth — state view
   const { entityMapRef: countyEntityMapRef } = useChoropleth({
     viewer: viewerRef.current,
     dataUrl: "/data/nj_counties_enriched.geojson",
@@ -202,7 +221,7 @@ export function CesiumMap() {
     keyField: "county_fips",
   });
 
-  // Tract choropleth (visible at county + tract level)
+  // Tract choropleth — county + tract view
   const { entityMapRef: tractEntityMapRef } = useChoropleth({
     viewer: viewerRef.current,
     dataUrl: "/data/nj_tracts_enriched.geojson",
@@ -212,7 +231,7 @@ export function CesiumMap() {
     keyField: "GEOID",
   });
 
-  // Camera fly-to on navigation state change
+  // Camera fly-to on navigation changes
   useEffect(() => {
     const v = viewerRef.current;
     if (!v) return;
@@ -254,12 +273,11 @@ export function CesiumMap() {
     }
   }, [viewLevel, selectedCountyFips, selectedTractId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Unified click handler — re-created when viewLevel changes
+  // Unified click handler — recreated when viewLevel changes
   useEffect(() => {
     const v = viewerRef.current;
     if (!v) return;
 
-    // Destroy previous handler
     if (handlerRef.current && !handlerRef.current.isDestroyed()) {
       handlerRef.current.destroy();
     }
@@ -269,28 +287,25 @@ export function CesiumMap() {
 
     handler.setInputAction((e: ScreenSpaceEventHandler.PositionedEvent) => {
       const picked = v.scene.pick(e.position);
-
       if (!defined(picked)) return;
 
-      // Building click (3D tile feature) — only act at tract level
-      if (picked instanceof Cesium3DTileFeature && viewLevel === "tract") {
-        navigateToBuilding();
+      // 3D tile feature click — extract OSM building properties
+      if (picked instanceof Cesium3DTileFeature) {
+        if (viewLevel === "tract" || viewLevel === "county") {
+          const props = extractBuildingProps(picked);
+          navigateToBuilding(props);
+        }
         return;
       }
 
-      // Entity click
+      // GeoJSON entity click
       const entity = picked?.id as EntityWithData | undefined;
       if (!entity?._featureData) return;
-
       const data = entity._featureData;
 
       if (viewLevel === "state" && data.county_fips) {
-        // Clicked a county polygon
-        const fips = data.county_fips as string;
-        const name = (data.NAME as string | undefined) ?? fips;
-        navigateToCounty(fips, name);
+        navigateToCounty(data.county_fips as string, (data.NAME as string | undefined) ?? data.county_fips as string);
       } else if (viewLevel === "county" && data.GEOID) {
-        // Clicked a tract polygon — pass feature props to the store
         navigateToTract(data.GEOID as string, data as unknown as TractProperties);
       }
     }, ScreenSpaceEventType.LEFT_CLICK);
@@ -306,34 +321,25 @@ export function CesiumMap() {
       <div
         ref={containerRef}
         tabIndex={0}
-        style={{
-          width: "100%",
-          height: "100%",
-          position: "absolute",
-          top: 0,
-          left: 0,
-          outline: "none",
-        }}
+        style={{ width: "100%", height: "100%", position: "absolute", top: 0, left: 0, outline: "none" }}
       />
       {tilesetError && (
-        <div
-          style={{
-            position: "absolute",
-            bottom: 24,
-            right: 16,
-            maxWidth: 340,
-            background: "rgba(30,10,10,0.92)",
-            border: "1px solid rgba(239,68,68,0.4)",
-            borderRadius: 8,
-            padding: "10px 14px",
-            color: "#fca5a5",
-            fontSize: 11,
-            fontFamily: "'Inter', system-ui, sans-serif",
-            lineHeight: 1.5,
-            backdropFilter: "blur(8px)",
-            zIndex: 10,
-          }}
-        >
+        <div style={{
+          position: "absolute",
+          bottom: 24,
+          right: 16,
+          maxWidth: 340,
+          background: "rgba(30,10,10,0.92)",
+          border: "1px solid rgba(239,68,68,0.4)",
+          borderRadius: 8,
+          padding: "10px 14px",
+          color: "#fca5a5",
+          fontSize: 11,
+          fontFamily: "'Inter', system-ui, sans-serif",
+          lineHeight: 1.5,
+          backdropFilter: "blur(8px)",
+          zIndex: 10,
+        }}>
           <span style={{ fontWeight: 700, color: "#f87171" }}>3D Buildings: </span>
           {tilesetError}
         </div>

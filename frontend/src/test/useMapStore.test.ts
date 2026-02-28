@@ -9,6 +9,7 @@ beforeEach(() => {
     selectedCountyName: null,
     selectedTractId: null,
     selectedTractProps: null,
+    selectedBuildingProps: null,
     activeVariable: "median_income",
     showBuildings: true,
     showTracts: true,
@@ -63,19 +64,35 @@ describe("useMapStore — navigation", () => {
     expect(s.selectedTractProps).toBeNull();
   });
 
-  it("navigateToBuilding advances to building level", () => {
+  it("navigateToBuilding advances to building level with props", () => {
+    const buildingProps = {
+      buildingType: "apartments",
+      levels: 5,
+      material: "brick",
+      name: "Test Tower",
+      estimatedHeight: 18,
+      lat: 40.05,
+      lon: -74.12,
+    };
     useMapStore.getState().navigateToCounty("003", "Bergen");
     useMapStore.getState().navigateToTract("34003040200");
+    useMapStore.getState().navigateToBuilding(buildingProps);
+    const s = useMapStore.getState();
+    expect(s.viewLevel).toBe("building");
+    expect(s.selectedTractId).toBe("34003040200");
+    expect(s.selectedBuildingProps?.buildingType).toBe("apartments");
+    expect(s.selectedBuildingProps?.levels).toBe(5);
+  });
+
+  it("navigateToBuilding without props stores null building props", () => {
     useMapStore.getState().navigateToBuilding();
-    expect(useMapStore.getState().viewLevel).toBe("building");
-    // Preserves tract selection
-    expect(useMapStore.getState().selectedTractId).toBe("34003040200");
+    expect(useMapStore.getState().selectedBuildingProps).toBeNull();
   });
 
   it("navigateToState resets all selections", () => {
     useMapStore.getState().navigateToCounty("003", "Bergen");
     useMapStore.getState().navigateToTract("34003040200");
-    useMapStore.getState().navigateToBuilding();
+    useMapStore.getState().navigateToBuilding({ buildingType: "house", levels: 2, material: null, name: null, estimatedHeight: 8, lat: null, lon: null });
     useMapStore.getState().navigateToState();
     const s = useMapStore.getState();
     expect(s.viewLevel).toBe("state");
@@ -83,6 +100,7 @@ describe("useMapStore — navigation", () => {
     expect(s.selectedCountyName).toBeNull();
     expect(s.selectedTractId).toBeNull();
     expect(s.selectedTractProps).toBeNull();
+    expect(s.selectedBuildingProps).toBeNull();
   });
 });
 

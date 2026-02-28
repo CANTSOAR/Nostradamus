@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { VariableKey } from "../types/variables";
 import type { ViewLevel } from "../types/navigation";
 import type { TractProperties } from "../types/tract";
+import type { BuildingProperties } from "../types/building";
 
 interface MapStore {
   // --- Navigation ---
@@ -10,11 +11,12 @@ interface MapStore {
   selectedCountyName: string | null;
   selectedTractId: string | null;
   selectedTractProps: TractProperties | null;
+  selectedBuildingProps: BuildingProperties | null;
 
   navigateToState: () => void;
   navigateToCounty: (fips: string, name: string) => void;
   navigateToTract: (geoid: string, props?: TractProperties) => void;
-  navigateToBuilding: () => void;
+  navigateToBuilding: (props?: BuildingProperties) => void;
 
   // --- Variable selection ---
   activeVariable: VariableKey;
@@ -39,6 +41,7 @@ export const useMapStore = create<MapStore>((set) => ({
   selectedCountyName: null,
   selectedTractId: null,
   selectedTractProps: null,
+  selectedBuildingProps: null,
 
   navigateToState: () =>
     set({
@@ -47,6 +50,7 @@ export const useMapStore = create<MapStore>((set) => ({
       selectedCountyName: null,
       selectedTractId: null,
       selectedTractProps: null,
+      selectedBuildingProps: null,
     }),
 
   navigateToCounty: (fips, name) =>
@@ -56,13 +60,19 @@ export const useMapStore = create<MapStore>((set) => ({
       selectedCountyName: name,
       selectedTractId: null,
       selectedTractProps: null,
+      selectedBuildingProps: null,
     }),
 
   navigateToTract: (geoid, props) =>
-    set({ viewLevel: "tract", selectedTractId: geoid, selectedTractProps: props ?? null }),
+    set({
+      viewLevel: "tract",
+      selectedTractId: geoid,
+      selectedTractProps: props ?? null,
+      selectedBuildingProps: null,
+    }),
 
-  navigateToBuilding: () =>
-    set({ viewLevel: "building" }),
+  navigateToBuilding: (props) =>
+    set({ viewLevel: "building", selectedBuildingProps: props ?? null }),
 
   activeVariable: "median_income",
   setActiveVariable: (v) => set({ activeVariable: v }),

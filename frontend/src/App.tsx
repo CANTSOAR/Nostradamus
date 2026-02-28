@@ -120,33 +120,48 @@ export default function App() {
   );
 }
 
+function StatRow({ label, value }: { label: string; value: string | null }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "4px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+      <span style={{ fontSize: 11, color: "#64748b" }}>{label}</span>
+      <span style={{ fontSize: 12, fontWeight: 600, color: value ? "#e2e8f0" : "#334155" }}>{value ?? "—"}</span>
+    </div>
+  );
+}
+
+// Human-readable label for OSM building type tags
+function formatBuildingType(t: string | null): string | null {
+  if (!t) return null;
+  const map: Record<string, string> = {
+    apartments: "Apartments", house: "House", commercial: "Commercial",
+    industrial: "Industrial", office: "Office", retail: "Retail",
+    residential: "Residential", school: "School", hospital: "Hospital",
+    university: "University", hotel: "Hotel", warehouse: "Warehouse",
+    church: "Church", garage: "Garage", yes: "Building",
+  };
+  return map[t] ?? t.charAt(0).toUpperCase() + t.slice(1).replace(/_/g, " ");
+}
+
 function SimulationPlaceholder() {
-  const { navigateToTract, selectedTractId } = useMapStore();
+  const { navigateToTract, selectedTractId, selectedBuildingProps } = useMapStore();
+  const b = selectedBuildingProps;
 
   return (
     <div>
+      {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
         <div>
           <div style={{ fontSize: 10, color: "#64748b", letterSpacing: "0.1em", fontWeight: 600 }}>
-            BUILDING SIMULATION
+            BUILDING
           </div>
           <div style={{ fontSize: 14, fontWeight: 700, color: "#94d2bd", marginTop: 2 }}>
-            Agent Model
+            {b?.name ?? formatBuildingType(b?.buildingType ?? null) ?? "Selected Building"}
           </div>
         </div>
         {selectedTractId && (
           <button
             onClick={() => navigateToTract(selectedTractId)}
-            style={{
-              background: "rgba(255,255,255,0.06)",
-              border: "1px solid rgba(255,255,255,0.1)",
-              borderRadius: 5,
-              color: "#64748b",
-              cursor: "pointer",
-              fontSize: 14,
-              padding: "2px 8px",
-              lineHeight: 1.5,
-            }}
+            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 5, color: "#64748b", cursor: "pointer", fontSize: 14, padding: "2px 8px", lineHeight: 1.5 }}
             aria-label="Back to tract"
           >
             ×
@@ -154,38 +169,37 @@ function SimulationPlaceholder() {
         )}
       </div>
 
-      <div
-        style={{
-          background: "rgba(120,230,255,0.04)",
-          border: "1px solid rgba(120,230,255,0.15)",
-          borderRadius: 8,
-          padding: "16px 12px",
-          textAlign: "center",
-        }}
-      >
-        <div style={{ fontSize: 28, marginBottom: 8 }}>⬡</div>
-        <div style={{ fontSize: 12, fontWeight: 600, color: "#94d2bd", marginBottom: 4 }}>
+      {/* OSM building properties */}
+      {b && (
+        <div style={{ marginBottom: 12 }}>
+          <StatRow label="Type" value={formatBuildingType(b.buildingType)} />
+          <StatRow label="Height" value={b.estimatedHeight != null ? `${b.estimatedHeight} m` : null} />
+          <StatRow label="Floors" value={b.levels != null ? String(b.levels) : null} />
+          <StatRow label="Material" value={b.material ? b.material.charAt(0).toUpperCase() + b.material.slice(1) : null} />
+          {b.lat != null && (
+            <StatRow label="Location" value={`${b.lat.toFixed(5)}, ${b.lon?.toFixed(5)}`} />
+          )}
+        </div>
+      )}
+
+      {/* Simulation placeholder */}
+      <div style={{ background: "rgba(120,230,255,0.04)", border: "1px solid rgba(120,230,255,0.15)", borderRadius: 8, padding: "12px", textAlign: "center" }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: "#94d2bd", marginBottom: 4 }}>
           Rust ABM — Coming Soon
         </div>
-        <div style={{ fontSize: 11, color: "#475569", lineHeight: 1.5 }}>
-          Agent-based simulation will render pedestrian and economic activity patterns for this building
-          via WebSocket.
+        <div style={{ fontSize: 10, color: "#475569", lineHeight: 1.5 }}>
+          Agent-based simulation via WebSocket
         </div>
       </div>
 
-      <div style={{ marginTop: 12, fontSize: 10, color: "#1e40af", display: "flex", gap: 6, flexDirection: "column" }}>
-        <div style={{ display: "flex", justifyContent: "space-between" }}>
-          <span style={{ color: "#475569" }}>Agents</span>
-          <span style={{ color: "#334155" }}>–</span>
-        </div>
-        <div style={{ display: "flex", justifyContent: "space-between" }}>
-          <span style={{ color: "#475569" }}>Simulation tick</span>
-          <span style={{ color: "#334155" }}>–</span>
-        </div>
-        <div style={{ display: "flex", justifyContent: "space-between" }}>
-          <span style={{ color: "#475569" }}>WebSocket</span>
-          <span style={{ color: "#334155" }}>disconnected</span>
-        </div>
+      <div style={{ marginTop: 10, display: "flex", gap: 6, flexDirection: "column" }}>
+        <StatRow label="Agents" value={null} />
+        <StatRow label="Tick" value={null} />
+        <StatRow label="WebSocket" value="disconnected" />
+      </div>
+
+      <div style={{ fontSize: 10, color: "#334155", marginTop: 8, textAlign: "right" }}>
+        OSM 3D Buildings · Cesium Ion
       </div>
     </div>
   );
