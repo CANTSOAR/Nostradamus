@@ -1,3 +1,22 @@
+# Rust
 /target
+Cargo.lock
+
+# Node / Frontend
+node_modules/
+dist/
+.env
+.env.local
+
+# macOS
+.DS_Store
+
+# Data
 *.pbf
 *.osm
+data/output/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
