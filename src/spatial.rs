@@ -47,4 +47,14 @@ pub struct Location {
     
     // Future expansion points
     pub capacity: u32,
+    pub wealth: f64,
+}
+
+impl Location {
+    /// Evaluated Daily, passing in the Organization's economic averages
+    pub fn update_finances(&mut self, base_revenue: f64, base_bills: f64) {
+        let daily_rev = base_revenue / 365.0;
+        let daily_bills = base_bills / 365.0;
+        self.wealth += daily_rev - daily_bills;
+    }
 }

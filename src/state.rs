@@ -5,6 +5,8 @@ use serde::{Serialize, Deserialize};
 pub struct Global {
     /// The current time-step of the simulation
     pub tick: u64,
+    /// Offset in seconds from Jan 1, 2010 (1 tick = 1 hour)
+    pub time_offset_seconds: u64,
     
     // Macro-Economic Parameters
     /// Baseline global tax rate applied to income
@@ -32,6 +34,7 @@ impl Default for Global {
     fn default() -> Self {
         Self {
             tick: 0,
+            time_offset_seconds: 0,
             base_tax_rate: 0.05,
             inflation_rate: 1.02,
             base_interest_rate: 0.04,

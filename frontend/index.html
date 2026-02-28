@@ -6,6 +6,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Nostradamus Live Simulation</title>
     <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+        }
+
         body {
             margin: 0;
             overflow: hidden;
@@ -13,6 +19,8 @@
             color: #c5c6c7;
             font-family: 'Inter', sans-serif;
             display: flex;
+            width: 100vw;
+            height: 100vh;
         }
 
         #dashboard {
@@ -58,6 +66,8 @@
         #canvas-container {
             flex-grow: 1;
             position: relative;
+            height: 100vh;
+            overflow: hidden;
         }
 
         canvas {
@@ -151,6 +161,115 @@
             margin-bottom: 4px;
             font-size: 0.95rem;
         }
+
+        #controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            display: grid;
+            grid-template-columns: repeat(3, 40px);
+            grid-template-rows: repeat(3, 40px);
+            gap: 5px;
+            z-index: 100;
+        }
+
+        .ctrl-btn {
+            background: rgba(31, 40, 51, 0.9);
+            border: 1px solid #45a29e;
+            color: #66fcf1;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 1.2rem;
+            user-select: none;
+            transition: 0.1s;
+        }
+
+        .ctrl-btn:hover {
+            background: #45a29e;
+            color: #0b0c10;
+        }
+
+        .ctrl-btn:active {
+            transform: scale(0.9);
+        }
+
+        #btn-up {
+            grid-column: 2;
+            grid-row: 1;
+        }
+
+        #btn-left {
+            grid-column: 1;
+            grid-row: 2;
+        }
+
+        #btn-right {
+            grid-column: 3;
+            grid-row: 2;
+        }
+
+        #btn-down {
+            grid-column: 2;
+            grid-row: 3;
+        }
+
+        #btn-zin {
+            grid-column: 1;
+            grid-row: 1;
+        }
+
+        #btn-zout {
+            grid-column: 3;
+            grid-row: 1;
+        }
+
+        #pins-container {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            display: flex;
+            flex-direction: column-reverse;
+            gap: 10px;
+            z-index: 100;
+        }
+
+        .pin-card {
+            background: rgba(31, 40, 51, 0.95);
+            border: 1px solid #66fcf1;
+            padding: 12px;
+            border-radius: 4px;
+            color: #c5c6c7;
+            font-size: 0.85rem;
+            width: 260px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.6);
+            position: relative;
+        }
+
+        .pin-card strong {
+            color: #fff;
+            display: block;
+            margin-bottom: 4px;
+            font-size: 0.95rem;
+        }
+
+        .pin-close {
+            position: absolute;
+            top: 5px;
+            right: 8px;
+            cursor: pointer;
+            color: #ff4d4d;
+            font-weight: bold;
+            font-size: 1.2rem;
+            transition: 0.3s;
+        }
+
+        .pin-close:hover {
+            color: #fff;
+        }
     </style>
 </head>
 
@@ -160,6 +279,10 @@
         <div class="metric-card">
             <span>Tick Speed</span>
             <strong id="m-tick">0</strong>
+        </div>
+        <div class="metric-card">
+            <span>Simulated Time</span>
+            <strong id="m-irl-time" style="font-size: 1.1rem; line-height: 1.4;">2010-01-01</strong>
         </div>
         <div class="metric-card">
             <span>Active Locations</span>
@@ -193,11 +316,12 @@
             <div class="ctrl-btn" id="btn-down" title="Pan Down">↓</div>
             <div class="ctrl-btn" id="btn-right" title="Pan Right">→</div>
         </div>
+        <div id="pins-container"></div>
         <div id="legend">
             <h4>Legend</h4>
             <div class="legend-item"><span style="background: #ffaa00;"></span> Store</div>
             <div class="legend-item"><span style="background: #66fcf1;"></span> Employer</div>
-            <div class="legend-item"><span style="background: #4a4e69;"></span> Home</div>
+            <div class="legend-item"><span style="background: #9fa8da;"></span> Home</div>
             <div class="legend-item"><span style="background: #ffffff;"></span> Public/Mixed</div>
             <div class="legend-item"><span class="legend-agent" style="background: #ff4d4d;"></span> Agent (Moving)
             </div>

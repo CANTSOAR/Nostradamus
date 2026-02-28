@@ -22,6 +22,35 @@ pub struct Agent {
     pub family_agent_ids: Vec<u64>,        // List of other Agent IDs they are related to
 }
 
+impl Agent {
+    /// Runs every 24 ticks (Daily). Processes income, consumption, and wealth accumulation.
+    pub fn update_finances(&mut self) {
+        let daily_income = self.income / 365.0;
+        let consumed = self.propensity_to_consume * daily_income;
+        self.wealth += daily_income - consumed;
+    }
+
+    /// Runs every 24 ticks. Decays health if bankrupt, otherwise slowly regenerates.
+    pub fn update_health(&mut self) {
+        if self.wealth <= 0.0 {
+            // Take a brutal 5% compounding health hit per day if completely broke
+            self.health -= 0.05;
+        } else {
+            // Slowly recover if they have money to eat
+            self.health += 0.01;
+        }
+        
+        // Clamp bounds securely
+        if self.health > 1.0 { self.health = 1.0; }
+        if self.health < 0.0 { self.health = 0.0; }
+    }
+
+    /// Runs exactly once per 8760 ticks (Yearly)
+    pub fn update_age(&mut self) {
+        self.age += 1;
+    }
+}
+
 /// A governing body, corporation, or entity that owns locations and pays agents
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Organization {
@@ -29,6 +58,20 @@ pub struct Organization {
     pub name: String,
     pub avg_revenue: f64,
     pub avg_bills: f64,
+    
+    // Dynamic Cash
+    pub total_funds: f64,
+}
+
+impl Organization {
+    /// Evaluated Daily
+    pub fn update_finances(&mut self) {
+        // Apportion annual numbers down to daily
+        let daily_rev = self.avg_revenue / 365.0;
+        let daily_bills = self.avg_bills / 365.0;
+        
+        self.total_funds += daily_rev - daily_bills;
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
