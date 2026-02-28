@@ -104,10 +104,15 @@ interface MapStore {
   viewPreset: "default" | "panoptic" | "tactical";
   setViewPreset: (p: "default" | "panoptic" | "tactical") => void;
 
-  // Future seam for Rust ABM — add simulation state here
-  // simulationRunning: boolean;
-  // agentCount: number;
-  // tick: number;
+  // --- Cesium Engine ---
+  viewer: any | null;
+  setViewer: (v: any) => void;
+
+  // --- Simulation (Nostradamus Engine) ---
+  simulationData: any | null;
+  setSimulationData: (data: any) => void;
+  simulationStatus: "connected" | "disconnected" | "connecting";
+  setSimulationStatus: (status: "connected" | "disconnected" | "connecting") => void;
 }
 
 export const useMapStore = create<MapStore>((set) => ({
@@ -209,6 +214,12 @@ export const useMapStore = create<MapStore>((set) => ({
 
   viewPreset: "default",
   setViewPreset: (p) => set({ viewPreset: p }),
+
+  viewer: null,
+  setViewer: (v) => set({ viewer: v }),
+
+  simulationData: null,
+  setSimulationData: (data) => set({ simulationData: data }),
+  simulationStatus: "disconnected",
+  setSimulationStatus: (status) => set({ simulationStatus: status }),
 }));
-
-

@@ -10,6 +10,8 @@ import { ViewSelector } from "./components/ViewSelector";
 import { FlightInfoPanel } from "./components/FlightInfoPanel";
 import { MunicipalitySidebar } from "./components/MunicipalitySidebar";
 import { SkyModeSelector } from "./components/SkyModeSelector";
+import { useSimulation } from "./hooks/useSimulation";
+import { SimulationLayer } from "./components/SimulationLayer";
 
 const panelStyle: React.CSSProperties = {
   background: "rgba(15,20,30,0.85)",
@@ -23,12 +25,14 @@ const panelStyle: React.CSSProperties = {
 
 export default function App() {
   const { activeVariable, viewLevel, selectedTractId, trackedFlightData, selectedMunicipalityProps } = useMapStore();
+  useSimulation();
 
 
   return (
     <div style={{ width: "100vw", height: "100vh", position: "relative", background: "#020408" }}>
       {/* Globe fills entire viewport */}
       <CesiumMap />
+      <SimulationLayer />
 
       {/* Panoptic HUD Overlays removed */}
 
@@ -168,7 +172,7 @@ export default function App() {
               width: 260,
             }}
           >
-            <SimulationPlaceholder />
+            <SimulationPanel />
           </div>
         )
       }
@@ -215,8 +219,8 @@ function formatBuildingType(t: string | null): string | null {
   return map[t] ?? t.charAt(0).toUpperCase() + t.slice(1).replace(/_/g, " ");
 }
 
-function SimulationPlaceholder() {
-  const { navigateToTract, selectedTractId, selectedBuildingProps } = useMapStore();
+function SimulationPanel() {
+  const { navigateToTract, selectedTractId, selectedBuildingProps, simulationData, simulationStatus } = useMapStore();
   const b = selectedBuildingProps;
 
   return (
@@ -255,24 +259,28 @@ function SimulationPlaceholder() {
         </div>
       )}
 
-      {/* Simulation placeholder */}
-      <div style={{ background: "rgba(120,230,255,0.04)", border: "1px solid rgba(120,230,255,0.15)", borderRadius: 8, padding: "12px", textAlign: "center" }}>
-        <div style={{ fontSize: 11, fontWeight: 600, color: "#94d2bd", marginBottom: 4 }}>
-          Rust ABM — Coming Soon
+      {/* Simulation Real Metrics */}
+      <div style={{ background: "rgba(120,230,255,0.06)", border: "1px solid rgba(120,230,255,0.2)", borderRadius: 8, padding: "12px" }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: "#94d2bd", marginBottom: 8, display: "flex", justifyContent: "space-between" }}>
+          <span>NOSTRADAMUS ABM</span>
+          <span style={{ color: simulationStatus === 'connected' ? '#66fcf1' : '#ff4d4d' }}>
+            {simulationStatus.toUpperCase()}
+          </span>
         </div>
-        <div style={{ fontSize: 10, color: "#475569", lineHeight: 1.5 }}>
-          Agent-based simulation via WebSocket
-        </div>
-      </div>
 
-      <div style={{ marginTop: 10, display: "flex", gap: 6, flexDirection: "column" }}>
-        <StatRow label="Agents" value={null} />
-        <StatRow label="Tick" value={null} />
-        <StatRow label="WebSocket" value="disconnected" />
+        <StatRow label="Agents (Sample)" value={simulationData?.active_agents_subset?.length?.toString() ?? "0"} />
+        <StatRow label="Tick" value={simulationData?.tick?.toString() ?? "0"} />
+
+        {simulationData?.global_metrics && (
+          <>
+            <StatRow label="Inflation" value={(simulationData.global_metrics.inflation_rate * 100).toFixed(1) + "%"} />
+            <StatRow label="Tax Rate" value={(simulationData.global_metrics.base_tax_rate * 100).toFixed(1) + "%"} />
+          </>
+        )}
       </div>
 
       <div style={{ fontSize: 10, color: "#334155", marginTop: 8, textAlign: "right" }}>
-        OSM 3D Buildings · Cesium Ion
+        Rust Backend · WebSocket
       </div>
     </div>
   );

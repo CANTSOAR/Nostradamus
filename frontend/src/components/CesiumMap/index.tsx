@@ -386,6 +386,7 @@ export function CesiumMap() {
     }
 
     viewerRef.current = v;
+    useMapStore.getState().setViewer(v);
 
     const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
     Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN ?? "";
