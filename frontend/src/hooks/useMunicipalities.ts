@@ -21,6 +21,7 @@ export interface UseMunicipalitiesOptions {
   viewer: Viewer | null;
   show: boolean;
   selectedMunGeoid: string | null;
+  agentMatchedGeoids?: string[] | null;
 }
 
 export interface UseMunicipalitiesResult {
@@ -31,6 +32,7 @@ export function useMunicipalities({
   viewer,
   show,
   selectedMunGeoid,
+  agentMatchedGeoids,
 }: UseMunicipalitiesOptions): UseMunicipalitiesResult {
   const dsRef = useRef<GeoJsonDataSource | null>(null);
   const loadedRef = useRef(false);
@@ -117,6 +119,38 @@ export function useMunicipalities({
 
     prevSelectedRef.current = selectedMunGeoid;
   }, [selectedMunGeoid]);
+
+  // Apply Agent Match highlighting
+  useEffect(() => {
+    const map = entityMapRef.current;
+
+    for (const [geoid, entity] of map.entries()) {
+      if (entity.polygon) {
+        if (agentMatchedGeoids && agentMatchedGeoids.length > 0) {
+          if (agentMatchedGeoids.includes(geoid)) {
+            entity.polygon.material = new ColorMaterialProperty(
+              Color.fromCssColorString("#a855f7").withAlpha(0.6)
+            ) as unknown as import("cesium").MaterialProperty;
+            (entity.polygon as any).outlineColor = Color.fromCssColorString("#d8b4fe");
+            (entity.polygon as any).outlineWidth = 2.5;
+          } else {
+            entity.polygon.material = new ColorMaterialProperty(
+              Color.fromCssColorString("#1a1a2e").withAlpha(0.2)
+            ) as unknown as import("cesium").MaterialProperty;
+            (entity.polygon as any).outlineColor = Color.fromCssColorString("#1a1a2e").withAlpha(0.4);
+            (entity.polygon as any).outlineWidth = 0.5;
+          }
+        } else {
+          // Restore to defaults if no active AI filter (and not selected)
+          if (geoid !== selectedMunGeoid) {
+            entity.polygon.material = new ColorMaterialProperty(FILL_DEFAULT) as unknown as import("cesium").MaterialProperty;
+            (entity.polygon as any).outlineColor = OUTLINE_DEFAULT;
+            (entity.polygon as any).outlineWidth = 1.2;
+          }
+        }
+      }
+    }
+  }, [agentMatchedGeoids, selectedMunGeoid]);
 
   return { entityMapRef };
 }

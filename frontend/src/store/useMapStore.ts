@@ -109,10 +109,14 @@ interface MapStore {
   setViewer: (v: any) => void;
 
   // --- Simulation (Nostradamus Engine) ---
-  simulationData: any | null;
-  setSimulationData: (data: any) => void;
+  simulationData: import('../types/payload').SimulationPayload | null;
+  setSimulationData: (data: import('../types/payload').SimulationPayload | null) => void;
   simulationStatus: "connected" | "disconnected" | "connecting";
   setSimulationStatus: (status: "connected" | "disconnected" | "connecting") => void;
+
+  // --- AI Agent ---
+  agentMatchedGeoids: string[] | null;
+  setAgentMatchedGeoids: (geoids: string[] | null) => void;
 }
 
 export const useMapStore = create<MapStore>((set) => ({
@@ -222,4 +226,7 @@ export const useMapStore = create<MapStore>((set) => ({
   setSimulationData: (data) => set({ simulationData: data }),
   simulationStatus: "disconnected",
   setSimulationStatus: (status) => set({ simulationStatus: status }),
+
+  agentMatchedGeoids: null,
+  setAgentMatchedGeoids: (geoids) => set({ agentMatchedGeoids: geoids }),
 }));

@@ -12,6 +12,7 @@ import { MunicipalitySidebar } from "./components/MunicipalitySidebar";
 import { SkyModeSelector } from "./components/SkyModeSelector";
 import { useSimulation } from "./hooks/useSimulation";
 import { SimulationLayer } from "./components/SimulationLayer";
+import { AgentChat } from "./components/AgentChat";
 
 const panelStyle: React.CSSProperties = {
   background: "rgba(15,20,30,0.85)",
@@ -193,6 +194,8 @@ export default function App() {
           </div>
         )
       }
+
+      <AgentChat />
     </div >
   );
 }

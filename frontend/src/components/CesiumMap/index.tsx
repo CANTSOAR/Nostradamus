@@ -295,6 +295,7 @@ export function CesiumMap() {
     isOrbitActive,
     skyMode,
     showMunicipalities, setSelectedMunicipality,
+    agentMatchedGeoids,
   } = useMapStore();
 
 
@@ -1117,6 +1118,7 @@ export function CesiumMap() {
     viewer: viewerRef.current,
     show: showMunicipalities,
     selectedMunGeoid: selectedMunicipalityProps?.mun_geoid ?? null,
+    agentMatchedGeoids,
   });
 
   // County/Tract choropleth
@@ -1127,6 +1129,7 @@ export function CesiumMap() {
     show: showTracts && viewLevel === "state",
     filterCountyFips: null,
     keyField: "county_fips",
+    agentMatchedGeoids,
   });
 
   const { entityMapRef: tractEntityMapRef } = useChoropleth({
@@ -1136,6 +1139,7 @@ export function CesiumMap() {
     show: showTracts && viewLevel !== "state",
     filterCountyFips: selectedCountyFips,
     keyField: "GEOID",
+    agentMatchedGeoids,
   });
 
   // Camera fly-to on navigation changes

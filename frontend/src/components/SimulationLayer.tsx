@@ -48,19 +48,19 @@ export function SimulationLayer() {
             });
         }
 
-        // Render locations (simplified for now)
-        if (simulationData.locations_subset) {
-            simulationData.locations_subset.forEach((loc: any) => {
-                if (!loc.coord) return;
+        // Render buildings
+        if (simulationData.buildings_subset) {
+            simulationData.buildings_subset.forEach((bld: any) => {
+                if (!bld.coord) return;
                 let color = Cesium.Color.WHITE;
-                if (loc.location_type === "Store") color = Cesium.Color.ORANGE;
-                else if (loc.location_type === "Employer") color = Cesium.Color.AQUAMARINE;
-                else if (loc.location_type === "Residential") color = Cesium.Color.SLATEGRAY;
+                if (bld.building_type === "Residential") color = Cesium.Color.SLATEGRAY;
+                else if (bld.building_type === "Commercial") color = Cesium.Color.ORANGE;
+                else if (bld.building_type === "Public") color = Cesium.Color.AQUAMARINE;
 
                 primitives.add({
                     position: Cesium.Cartesian3.fromDegrees(
-                        loc.coord.lon,
-                        loc.coord.lat,
+                        bld.coord.lon,
+                        bld.coord.lat,
                         0.0
                     ),
                     color: color,

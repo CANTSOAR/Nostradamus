@@ -22,29 +22,53 @@ pub struct GridCell {
     // Future: List of entities or references currently in this cell for spatial partitioning
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Tract {
+    pub geoid: String,
+    pub population: Option<f64>,
+    pub median_income: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Municipality {
+    pub id: String, // geoid
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct County {
+    pub fips: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Parcel {
+    pub id: u64,
+    pub coord_center: Coordinate,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum LocationType {
+pub enum BuildingType {
     Residential,
-    Store,
-    Employer,
-    /// Multi-purpose (e.g. mixed-use zoning)
+    Commercial,
     Mixed,
-    /// Public infrastructure like parks or gov buildings
+    Industrial,
     Public,
 }
 
-/// A location struct representing a proper physical entity (home, business, public space).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Location {
+pub struct Building {
     pub id: u64,
-    /// The proper name of the location
-    pub name: String,
     pub coord: Coordinate,
-    pub location_type: LocationType,
-    
-    /// Optional ID linking this physical location to an Organization (Company, Gov, etc.)
-    pub organization_id: Option<u64>,
-    
-    // Future expansion points
+    pub building_type: BuildingType,
     pub capacity: u32,
+    pub parcel_id: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Road {
+    pub id: u64,
+    pub capacity: u32,
+    pub speed_limit_mph: f64,
+    pub nodes: Vec<Coordinate>,
 }

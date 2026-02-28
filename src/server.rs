@@ -6,8 +6,8 @@ use futures_util::SinkExt;
 use serde::{Deserialize, Serialize};
 
 use crate::state::Global;
-use crate::entities::Agent;
-use crate::spatial::Location;
+use crate::entities::{Agent, Business, Vehicle};
+use crate::spatial::Building;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimulationPayload {
@@ -15,7 +15,9 @@ pub struct SimulationPayload {
     pub global_metrics: Global,
     /// We sub-sample agents so the web browser doesn't crash trying to render 1.1 million HTML5 elements
     pub active_agents_subset: Vec<Agent>,
-    pub locations_subset: Vec<Location>,
+    pub buildings_subset: Vec<Building>,
+    pub businesses_subset: Vec<Business>,
+    pub vehicles_subset: Vec<Vehicle>,
 }
 
 pub async fn start_websocket_server(state: Arc<Mutex<Option<SimulationPayload>>>) {

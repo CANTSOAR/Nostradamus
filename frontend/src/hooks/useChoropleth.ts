@@ -26,6 +26,7 @@ export interface UseChoroplethOptions {
   filterCountyFips?: string | null;
   /** Entity map key field — 'GEOID' for tracts, 'county_fips' for counties */
   keyField?: string;
+  agentMatchedGeoids?: string[] | null;
 }
 
 export interface UseChoroplethResult {
@@ -39,6 +40,7 @@ export function useChoropleth({
   show,
   filterCountyFips,
   keyField = "GEOID",
+  agentMatchedGeoids,
 }: UseChoroplethOptions): UseChoroplethResult {
   const dsRef = useRef<GeoJsonDataSource | null>(null);
   const loadedRef = useRef(false);
@@ -128,14 +130,30 @@ export function useChoropleth({
         if (visible) {
           const val = (entity as EntityWithData)._featureData?.[activeVariable];
           const colorStr = scale.getColor(typeof val === "number" ? val : null);
-          const cesiumColor = hexToCesiumColor(colorStr, 0.72);
+          let cesiumColor = hexToCesiumColor(colorStr, 0.72);
+
+          if (agentMatchedGeoids && agentMatchedGeoids.length > 0) {
+            const keyVal = (entity as EntityWithData)._featureData?.[keyField] as string | undefined;
+            if (keyVal && agentMatchedGeoids.includes(keyVal)) {
+              cesiumColor = Color.fromCssColorString("#a855f7").withAlpha(0.95);
+              (entity.polygon as any).outlineColor = Color.fromCssColorString("#d8b4fe");
+              (entity.polygon as any).outlineWidth = 2.5;
+            } else {
+              cesiumColor = cesiumColor.withAlpha(0.1);
+              (entity.polygon as any).outlineWidth = 0.5;
+            }
+          } else {
+            (entity.polygon as any).outlineColor = Color.fromCssColorString("#1a1a2e").withAlpha(0.4);
+            (entity.polygon as any).outlineWidth = 0.5;
+          }
+
           entity.polygon.material = new ColorMaterialProperty(
             cesiumColor
           ) as unknown as import("cesium").MaterialProperty;
         }
       }
     }
-  }, [viewer, activeVariable, show, isEntityVisible]);
+  }, [viewer, activeVariable, show, isEntityVisible, agentMatchedGeoids, keyField]);
 
   // Re-color when variable, show, or filter changes (with retry for initial load)
   useEffect(() => {

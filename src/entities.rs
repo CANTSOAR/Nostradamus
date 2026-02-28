@@ -16,23 +16,25 @@ pub struct Agent {
     pub current_coord: Coordinate,
     
     // Relationships (Stored as IDs to avoid recursive memory loops)
-    pub home_location_id: u64,
-    pub employer_location_id: Option<u64>, // Option because they might be unemployed
-    pub transport_id: Option<u64>,         // Option if they don't own a car/transit pass
+    pub home_building_id: u64,
+    pub employer_business_id: Option<u64>, // Option because they might be unemployed
+    pub employer_building_id: Option<u64>, // Physical location of work
+    pub vehicle_id: Option<u64>,         // Option if they don't own a car/transit pass
     pub family_agent_ids: Vec<u64>,        // List of other Agent IDs they are related to
 }
 
-/// A governing body, corporation, or entity that owns locations and pays agents
+/// A commercial entity that employs agents and conducts economic activity
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Organization {
+pub struct Business {
     pub id: u64,
     pub name: String,
     pub avg_revenue: f64,
     pub avg_bills: f64,
+    // Future: Industry sector (NAICS)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum TransportType {
+pub enum VehicleType {
     Walking,
     Bicycle,
     Car,
@@ -40,11 +42,11 @@ pub enum TransportType {
     Train,
 }
 
-/// A unit of transport moving across the map
+/// A unit of traffic moving across the road network
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Transport {
+pub struct Vehicle {
     pub id: u64,
-    pub transport_type: TransportType,
+    pub vehicle_type: VehicleType,
     pub capacity: u32,
     /// Units of distance to move per hour
     pub speed_mph: f64,
