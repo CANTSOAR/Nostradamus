@@ -13,6 +13,9 @@ import { SkyModeSelector } from "./components/SkyModeSelector";
 import { useSimulation } from "./hooks/useSimulation";
 import { SimulationLayer } from "./components/SimulationLayer";
 import { AgentChat } from "./components/AgentChat";
+import { BusinessInfoPanel } from "./components/BusinessInfoPanel";
+import { BusinessListPanel } from "./components/BusinessListPanel";
+import { BusinessesInFrame } from "./components/BusinessesInFrame";
 
 const panelStyle: React.CSSProperties = {
   background: "rgba(15,20,30,0.85)",
@@ -25,7 +28,7 @@ const panelStyle: React.CSSProperties = {
 };
 
 export default function App() {
-  const { activeVariable, viewLevel, selectedTractId, trackedFlightData, selectedMunicipalityProps } = useMapStore();
+  const { activeVariable, viewLevel, selectedTractId, trackedFlightData, selectedMunicipalityProps, showBusinesses, selectedBusiness, showBusinessList } = useMapStore();
   useSimulation();
 
 
@@ -127,6 +130,20 @@ export default function App() {
           <ViewSelector />
         </div>
       </div>
+
+      {showBusinesses && <BusinessesInFrame />}
+
+      {showBusinessList && (
+        <div style={{ ...panelStyle, position: "absolute", top: 16, right: 340, width: 320, bottom: 16 }}>
+          <BusinessListPanel />
+        </div>
+      )}
+
+      {selectedBusiness && (
+        <div style={{ ...panelStyle, position: "absolute", top: 16, right: showBusinessList ? 680 : 340, width: 300, maxHeight: "calc(100vh - 32px)", overflowY: "auto" }}>
+          <BusinessInfoPanel business={selectedBusiness} />
+        </div>
+      )}
 
       {/* Bottom-left: legend */}
       <div

@@ -1,6 +1,5 @@
 import { Agent } from './agent';
 import { BuildingProperties } from './building';
-import { BusinessProperties } from './business';
 import { Vehicle } from './vehicle';
 
 export interface GlobalMetrics {
@@ -20,6 +19,5 @@ export interface SimulationPayload {
     global_metrics: GlobalMetrics;
     active_agents_subset: Agent[];
     buildings_subset: BuildingProperties[];
-    businesses_subset: BusinessProperties[];
     vehicles_subset: Vehicle[];
 }

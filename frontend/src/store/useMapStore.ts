@@ -38,11 +38,22 @@ interface MapStore {
   setActiveVariable: (v: VariableKey) => void;
 
   // --- Municipality inspect ---
+  activeMunVariable: VariableKey;
+  setActiveMunVariable: (v: VariableKey) => void;
+
   selectedMunicipalityProps: MunicipalityProperties | null;
   setSelectedMunicipality: (props: MunicipalityProperties | null) => void;
 
   showMunicipalities: boolean;
   toggleMunicipalities: () => void;
+
+  // --- Business pins ---
+  showBusinesses: boolean;
+  toggleBusinesses: () => void;
+  selectedBusiness: { name: string; type: string; category: string; lat: number; lon: number } | null;
+  setSelectedBusiness: (b: { name: string; type: string; category: string; lat: number; lon: number } | null) => void;
+  showBusinessList: boolean;
+  toggleBusinessList: () => void;
 
   // --- Layer toggles ---
   showBuildings: boolean;
@@ -161,11 +172,21 @@ export const useMapStore = create<MapStore>((set) => ({
   activeVariable: "median_income",
   setActiveVariable: (v) => set({ activeVariable: v }),
 
+  activeMunVariable: "sec_healthcare",
+  setActiveMunVariable: (v) => set({ activeMunVariable: v }),
+
   selectedMunicipalityProps: null,
   setSelectedMunicipality: (props) => set({ selectedMunicipalityProps: props }),
 
   showMunicipalities: true,
   toggleMunicipalities: () => set((s) => ({ showMunicipalities: !s.showMunicipalities })),
+
+  showBusinesses: false,
+  toggleBusinesses: () => set((s) => ({ showBusinesses: !s.showBusinesses })),
+  selectedBusiness: null,
+  setSelectedBusiness: (b) => set({ selectedBusiness: b }),
+  showBusinessList: false,
+  toggleBusinessList: () => set((s) => ({ showBusinessList: !s.showBusinessList })),
 
   showBuildings: true,
   toggleBuildings: () => set((s) => ({ showBuildings: !s.showBuildings })),

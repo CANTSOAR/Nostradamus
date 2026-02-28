@@ -43,9 +43,13 @@ function Section({ title }: { title: string }) {
   );
 }
 
+import { VARIABLES } from "../../types/variables";
+
 export function LayerControl() {
   const {
     showMunicipalities, toggleMunicipalities,
+    activeMunVariable, setActiveMunVariable,
+    showBusinesses, toggleBusinesses,
     showBuildings, toggleBuildings,
     showTracts, toggleTracts,
     showSatellites, toggleSatellites,
@@ -60,6 +64,8 @@ export function LayerControl() {
     trackedFlightIcao, setTrackedFlightIcao,
   } = useMapStore();
 
+  const munOptions = VARIABLES.filter(v => v.group?.startsWith("municipality_"));
+
   return (
     <div>
       <div style={{ fontSize: 10, color: "#64748b", letterSpacing: "0.1em", fontWeight: 600, marginBottom: 8 }}>
@@ -71,6 +77,24 @@ export function LayerControl() {
         <Toggle label="3D Buildings" checked={showBuildings} onChange={toggleBuildings} />
         <Toggle label="Census Tracts" checked={showTracts} onChange={toggleTracts} />
         <Toggle label="Municipalities" checked={showMunicipalities} onChange={toggleMunicipalities} color="#7dd3fc" />
+        {showMunicipalities && (
+          <div style={{ marginLeft: 38, marginTop: -2 }}>
+            <select
+              value={activeMunVariable}
+              onChange={(e) => setActiveMunVariable(e.target.value as any)}
+              style={{
+                width: "100%", background: "rgba(15,23,42,0.8)",
+                border: "1px solid rgba(255,255,255,0.1)", color: "#93c5fd",
+                padding: "2px 4px", fontSize: 11, borderRadius: 4, outline: "none",
+                cursor: "pointer"
+              }}
+            >
+              {munOptions.map(v => (
+                <option key={v.key} value={v.key}>{v.label}</option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <Section title="SPACE" />
         <Toggle label="🛰 Satellites" checked={showSatellites} onChange={toggleSatellites} color="#00ffcc" />
@@ -121,6 +145,7 @@ export function LayerControl() {
         )}
 
         <Section title="GROUND" />
+        <Toggle label="🏢 Business POIs" checked={showBusinesses} onChange={toggleBusinesses} color="#f43f5e" />
         <Toggle label="🚗 NJ Traffic" checked={showTraffic} onChange={toggleTraffic} color="#facc15" />
         <Toggle label="📹 CCTV Cams" checked={showCCTV} onChange={toggleCCTV} color="#a855f7" />
 

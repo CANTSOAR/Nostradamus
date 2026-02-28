@@ -1,4 +1,4 @@
-import { useEffect, useRef, type MutableRefObject } from "react";
+import { useEffect, useRef, useCallback, type MutableRefObject } from "react";
 import {
   GeoJsonDataSource,
   Color,
@@ -6,6 +6,9 @@ import {
   type Viewer,
   type Entity,
 } from "cesium";
+import type { VariableKey } from "../types/variables";
+import { buildColorScale } from "../lib/colorScale";
+import { hexToCesiumColor } from "../lib/cesiumColors";
 
 type FeatureData = Record<string, unknown>;
 interface EntityWithData extends Entity {
@@ -22,6 +25,7 @@ export interface UseMunicipalitiesOptions {
   show: boolean;
   selectedMunGeoid: string | null;
   agentMatchedGeoids?: string[] | null;
+  activeMunVariable: VariableKey;
 }
 
 export interface UseMunicipalitiesResult {
@@ -33,6 +37,7 @@ export function useMunicipalities({
   show,
   selectedMunGeoid,
   agentMatchedGeoids,
+  activeMunVariable,
 }: UseMunicipalitiesOptions): UseMunicipalitiesResult {
   const dsRef = useRef<GeoJsonDataSource | null>(null);
   const loadedRef = useRef(false);
@@ -84,73 +89,70 @@ export function useMunicipalities({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewer]);
 
-  // Show / hide layer
-  useEffect(() => {
-    if (dsRef.current) dsRef.current.show = show;
-  }, [show]);
+  // Apply choropleth coloring + visibility
+  const applyColoring = useCallback(() => {
+    const ds = dsRef.current;
+    if (!ds || !viewer) return;
 
-  // Highlight selected municipality
-  useEffect(() => {
-    const map = entityMapRef.current;
+    const entities = ds.entities.values as EntityWithData[];
+    if (entities.length === 0) return;
 
-    // Restore previous selection's default style
-    if (prevSelectedRef.current && prevSelectedRef.current !== selectedMunGeoid) {
-      const prev = map.get(prevSelectedRef.current);
-      if (prev?.polygon) {
-        prev.polygon.material = new ColorMaterialProperty(
-          FILL_DEFAULT
-        ) as unknown as import("cesium").MaterialProperty;
-        prev.polygon.outlineColor = OUTLINE_DEFAULT as any;
-        prev.polygon.outlineWidth = 1.2 as any;
-      }
-    }
+    const values = entities.map((e) => {
+      const raw = e._featureData?.[activeMunVariable];
+      return typeof raw === "number" ? raw : null;
+    });
 
-    // Apply selected style
-    if (selectedMunGeoid) {
-      const sel = map.get(selectedMunGeoid);
-      if (sel?.polygon) {
-        sel.polygon.material = new ColorMaterialProperty(
-          FILL_SELECTED
-        ) as unknown as import("cesium").MaterialProperty;
-        sel.polygon.outlineColor = OUTLINE_SELECTED as any;
-        sel.polygon.outlineWidth = 2.5 as any;
-      }
-    }
+    const scale = buildColorScale(values, activeMunVariable);
 
-    prevSelectedRef.current = selectedMunGeoid;
-  }, [selectedMunGeoid]);
-
-  // Apply Agent Match highlighting
-  useEffect(() => {
-    const map = entityMapRef.current;
-
-    for (const [geoid, entity] of map.entries()) {
+    for (const entity of entities) {
       if (entity.polygon) {
-        if (agentMatchedGeoids && agentMatchedGeoids.length > 0) {
-          if (agentMatchedGeoids.includes(geoid)) {
-            entity.polygon.material = new ColorMaterialProperty(
-              Color.fromCssColorString("#a855f7").withAlpha(0.6)
-            ) as unknown as import("cesium").MaterialProperty;
-            (entity.polygon as any).outlineColor = Color.fromCssColorString("#d8b4fe");
-            (entity.polygon as any).outlineWidth = 2.5;
+        entity.show = show;
+        if (show) {
+          const val = entity._featureData?.[activeMunVariable];
+          const colorStr = scale.getColor(typeof val === "number" ? val : null);
+          let cesiumColor = hexToCesiumColor(colorStr, 0.72);
+          const geoid = entity._featureData?.["mun_geoid"] as string | undefined;
+
+          let outlineColor = OUTLINE_DEFAULT;
+          let outlineWidth = 1.2;
+
+          if (agentMatchedGeoids && agentMatchedGeoids.length > 0) {
+            if (geoid && agentMatchedGeoids.includes(geoid)) {
+              cesiumColor = Color.fromCssColorString("#a855f7").withAlpha(0.6);
+              outlineColor = Color.fromCssColorString("#d8b4fe");
+              outlineWidth = 2.5;
+            } else {
+              cesiumColor = cesiumColor.withAlpha(0.2);
+              outlineColor = Color.fromCssColorString("#1a1a2e").withAlpha(0.4);
+              outlineWidth = 0.5;
+            }
+          } else if (geoid === selectedMunGeoid) {
+            // Apply selected style
+            outlineColor = OUTLINE_SELECTED;
+            outlineWidth = 2.5;
+            cesiumColor = FILL_SELECTED;
           } else {
-            entity.polygon.material = new ColorMaterialProperty(
-              Color.fromCssColorString("#1a1a2e").withAlpha(0.2)
-            ) as unknown as import("cesium").MaterialProperty;
-            (entity.polygon as any).outlineColor = Color.fromCssColorString("#1a1a2e").withAlpha(0.4);
-            (entity.polygon as any).outlineWidth = 0.5;
+            // Default outline, choropleth fill
+            outlineColor = OUTLINE_DEFAULT;
+            outlineWidth = 1.2;
           }
-        } else {
-          // Restore to defaults if no active AI filter (and not selected)
-          if (geoid !== selectedMunGeoid) {
-            entity.polygon.material = new ColorMaterialProperty(FILL_DEFAULT) as unknown as import("cesium").MaterialProperty;
-            (entity.polygon as any).outlineColor = OUTLINE_DEFAULT;
-            (entity.polygon as any).outlineWidth = 1.2;
-          }
+
+          entity.polygon.material = new ColorMaterialProperty(cesiumColor) as unknown as import("cesium").MaterialProperty;
+          (entity.polygon as any).outlineColor = outlineColor;
+          (entity.polygon as any).outlineWidth = outlineWidth;
         }
       }
     }
-  }, [agentMatchedGeoids, selectedMunGeoid]);
+    prevSelectedRef.current = selectedMunGeoid;
+  }, [viewer, activeMunVariable, show, agentMatchedGeoids, selectedMunGeoid]);
+
+  // Re-color when variable, show, selection or filter changes (with retry for initial load)
+  useEffect(() => {
+    if (!dsRef.current) return;
+    applyColoring();
+    const t = setTimeout(applyColoring, 1500);
+    return () => clearTimeout(t);
+  }, [applyColoring]);
 
   return { entityMapRef };
 }

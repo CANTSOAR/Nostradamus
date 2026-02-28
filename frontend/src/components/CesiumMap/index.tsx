@@ -37,6 +37,7 @@ import { useMapStore } from "../../store/useMapStore";
 import { useChoropleth } from "../../hooks/useChoropleth";
 import { useSatellites } from "../../hooks/useSatellites";
 import { useFlights } from "../../hooks/useFlights";
+import { useBusinesses } from "../../hooks/useBusinesses";
 import type { FlightState } from "../../hooks/useFlights";
 import CesiumNavigation from "cesium-navigation-es6";
 
@@ -294,7 +295,8 @@ export function CesiumMap() {
     viewPreset,
     isOrbitActive,
     skyMode,
-    showMunicipalities, setSelectedMunicipality,
+    showMunicipalities, setSelectedMunicipality, activeMunVariable,
+    showBusinesses,
     agentMatchedGeoids,
   } = useMapStore();
 
@@ -302,7 +304,23 @@ export function CesiumMap() {
   // --- Live data hooks ---
   const satellites = useSatellites(showSatellites, detectionMode);
   const flights = useFlights(showFlights);
+
+  // Businesses
+  // @ts-ignore - The useBusinesses hook from ton-of-data might have minor type differences, we'll import  // Businesses
+  // @ts-ignore
+  const { entityMapRef: _businessMapRef } = useBusinesses({
+    viewer: viewerRef.current,
+    show: showBusinesses,
+  });
+
   // Earthquakes removed
+  const { entityMapRef: _munMapRef } = useMunicipalities({
+    viewer: viewerRef.current,
+    show: showMunicipalities,
+    selectedMunGeoid: selectedMunicipalityProps?.mun_geoid ?? null,
+    agentMatchedGeoids,
+    activeMunVariable,
+  });
 
   // Initialize Cesium viewer once
   useEffect(() => {
@@ -1119,6 +1137,7 @@ export function CesiumMap() {
     show: showMunicipalities,
     selectedMunGeoid: selectedMunicipalityProps?.mun_geoid ?? null,
     agentMatchedGeoids,
+    activeMunVariable,
   });
 
   // County/Tract choropleth
