@@ -1,0 +1,29 @@
+# IDE
+.vscode/
+.idea/
+.claude/
+.DS_Store
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+
+# Pipeline
+pipeline/__pycache__/
+pipeline/venv/
+pipeline/.venv/
+pipeline/.env
+pipeline/data/*.csv
+pipeline/data/*.geojson
+
+# Generic
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+coverage/
