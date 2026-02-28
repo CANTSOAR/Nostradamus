@@ -5,6 +5,7 @@ import { TractSidebar } from "./components/TractSidebar";
 import { LayerControl } from "./components/LayerControl";
 import { Legend } from "./components/Legend";
 import { NavigationBreadcrumb } from "./components/NavigationBreadcrumb";
+import { VisualModeSelector } from "./components/VisualModeSelector";
 
 const panelStyle: React.CSSProperties = {
   background: "rgba(15,20,30,0.85)",
@@ -84,6 +85,19 @@ export default function App() {
         }}
       >
         <Legend activeVariable={activeVariable} />
+      </div>
+
+      {/* Bottom-right: Visual Modes */}
+      <div
+        style={{
+          ...panelStyle,
+          position: "absolute",
+          bottom: 24,
+          right: 16,
+          padding: "12px 16px",
+        }}
+      >
+        <VisualModeSelector />
       </div>
 
       {/* Right panel — level-specific content */}
