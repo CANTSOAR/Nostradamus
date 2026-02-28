@@ -18,7 +18,7 @@ export class Color {
     return new Color(this.r, this.g, this.b, alpha);
   }
 
-  static fromCssColorString(css: string): Color {
+  static fromCssColorString(): Color {
     return new Color(0, 0, 0, 1);
   }
 }

@@ -3,7 +3,6 @@ import {
   Viewer,
   Cartesian3,
   Cesium3DTileset,
-  Cesium3DTileStyle,
   Math as CesiumMath,
   Color,
   IonImageryProvider,
@@ -13,13 +12,15 @@ import {
   defined,
   Cesium3DTileFeature,
   HeadingPitchRange,
-  createOsmBuildingsAsync,
+  createGooglePhotorealistic3DTileset,
+  Ion,
   type Entity,
 } from "cesium";
 import type { TractProperties } from "../../types/tract";
 import type { BuildingProperties } from "../../types/building";
 import { useMapStore } from "../../store/useMapStore";
 import { useChoropleth } from "../../hooks/useChoropleth";
+import CesiumNavigation from "cesium-navigation-es6";
 
 // NJ centroid at state overview altitude
 const NJ_DESTINATION = Cartesian3.fromDegrees(-74.4057, 40.0583, 220000);
@@ -31,9 +32,9 @@ interface EntityWithData extends Entity {
 }
 
 // Buildings visible at county zoom level and closer
-function buildingsVisible(viewLevel: string, showBuildings: boolean) {
+/* function buildingsVisible(viewLevel: string, showBuildings: boolean) {
   return showBuildings && viewLevel !== "state";
-}
+} */
 
 // Extract typed building properties from a picked 3D tile feature
 function extractBuildingProps(feature: Cesium3DTileFeature): BuildingProperties {
@@ -98,27 +99,33 @@ export function CesiumMap() {
     v.scene.screenSpaceCameraController.enableTranslate = true;
 
     v.scene.backgroundColor = Color.fromCssColorString("#020408");
-    v.scene.skyAtmosphere.hueShift = 0.3;
-    v.scene.skyAtmosphere.saturationShift = 0.3;
-    v.scene.skyAtmosphere.brightnessShift = -0.3;
+    if (v.scene.skyAtmosphere) {
+      v.scene.skyAtmosphere.hueShift = 0.3;
+      v.scene.skyAtmosphere.saturationShift = 0.3;
+      v.scene.skyAtmosphere.brightnessShift = -0.3;
+    }
     v.scene.globe.enableLighting = true;
     v.scene.globe.showGroundAtmosphere = true;
     v.scene.fog.enabled = true;
 
+    // Google 3D Tiles require terrain/globe depth testing so they don't float or sink oddly
+    v.scene.globe.depthTestAgainstTerrain = true;
+    v.scene.shadowMap.enabled = true;
+
     v.scene.postProcessStages.fxaa.enabled = true;
     const bloom = v.scene.postProcessStages.bloom;
     bloom.enabled = true;
-    // @ts-expect-error — uniforms typed as unknown in older typedefs
+    // @ts-ignore — uniforms typed as unknown in older typedefs
     bloom.uniforms.glowOnly = false;
-    // @ts-expect-error
+    // @ts-ignore
     bloom.uniforms.contrast = 100;
-    // @ts-expect-error
+    // @ts-ignore
     bloom.uniforms.brightness = -0.5;
-    // @ts-expect-error
+    // @ts-ignore
     bloom.uniforms.delta = 1.0;
-    // @ts-expect-error
+    // @ts-ignore
     bloom.uniforms.sigma = 2.0;
-    // @ts-expect-error
+    // @ts-ignore
     bloom.uniforms.stepSize = 1.0;
 
     // Remove default Bing Maps layer synchronously so first frame doesn't crash
@@ -141,7 +148,6 @@ export function CesiumMap() {
         );
       });
 
-    // Fly to NJ
     v.camera.flyTo({
       destination: NJ_DESTINATION,
       orientation: {
@@ -152,11 +158,26 @@ export function CesiumMap() {
       duration: 2,
     });
 
+    try {
+      new CesiumNavigation(v, {
+        enableCompass: true,
+        enableZoomControls: true,
+        enableDistanceLegend: true,
+        enableCompassOuterRing: true,
+      });
+    } catch (e) {
+      console.warn("Failed to initialize CesiumNavigation", e);
+    }
+
     viewerRef.current = v;
 
-    // OSM 3D Buildings via createOsmBuildingsAsync (Cesium-recommended API)
-    // Requires asset 96188 in your Ion account at ion.cesium.com
-    createOsmBuildingsAsync()
+    // Initialize Google Photorealistic 3D Tiles using native API
+    const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "AIzaSyA-WZxKSUnIIufiLtqX85u3xJd7weKFib4";
+    Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN ?? ""; // Ensure token is valid for overall Cesium Ion usage
+
+    createGooglePhotorealistic3DTileset({
+      key: apiKey,
+    })
       .then((tileset) => {
         // Guard: viewer may have been destroyed by React StrictMode cleanup
         if (v.isDestroyed() || viewerRef.current !== v) {
@@ -167,31 +188,20 @@ export function CesiumMap() {
         v.scene.primitives.add(tileset);
         tileset.maximumScreenSpaceError = 16;
 
-        // Dark cyberpunk style: color by height
-        tileset.style = new Cesium3DTileStyle({
-          color: {
-            conditions: [
-              ["${feature['cesium#estimatedHeight']} > 150", "color('rgba(120,230,255,0.95)')"],
-              ["${feature['cesium#estimatedHeight']} > 60",  "color('rgba(70,170,225,0.9)')"],
-              ["${feature['cesium#estimatedHeight']} > 20",  "color('rgba(45,110,180,0.85)')"],
-              ["true",                                        "color('rgba(28,65,120,0.8)')"],
-            ],
-          },
-        });
-
         // Use live store state (not stale closure) for initial visibility
-        const { showBuildings: sb, viewLevel: vl } = useMapStore.getState();
-        tileset.show = buildingsVisible(vl, sb);
+        // TEMP: Force show to verify rendering
+        // const { showBuildings: sb, viewLevel: vl } = useMapStore.getState();
+        tileset.show = true;
         setTilesetError(null);
       })
       .catch((err: unknown) => {
         if (v.isDestroyed() || viewerRef.current !== v) return;
-        console.error("OSM Buildings tileset failed:", err);
+        console.error("Photorealistic 3D Tiles tileset failed:", err);
         const msg = err instanceof Error ? err.message : String(err);
         setTilesetError(
           msg.includes("403") || msg.includes("401")
-            ? "Go to ion.cesium.com → My Assets → search 'OSM Buildings' → Add to my assets"
-            : `3D Buildings failed: ${msg}`
+            ? "Ensure VITE_GOOGLE_MAPS_API_KEY is set in .env with Map Tiles API enabled"
+            : `Photorealistic 3D Tiles failed: ${msg}`
         );
       });
 
@@ -207,7 +217,9 @@ export function CesiumMap() {
   // Sync building visibility when viewLevel or toggle changes
   useEffect(() => {
     if (tilesetRef.current) {
-      tilesetRef.current.show = buildingsVisible(viewLevel, showBuildings);
+      // TEMP: force show
+      // tilesetRef.current.show = buildingsVisible(viewLevel, showBuildings);
+      tilesetRef.current.show = true;
     }
   }, [showBuildings, viewLevel]);
 
@@ -252,7 +264,7 @@ export function CesiumMap() {
         v.flyTo(entity, {
           duration: 1.5,
           offset: new HeadingPitchRange(0, CesiumMath.toRadians(-50), 0),
-        }).catch(() => {});
+        }).catch(() => { });
       }
     } else if (viewLevel === "tract" && selectedTractId) {
       const entity = tractEntityMapRef.current.get(selectedTractId);
@@ -260,7 +272,7 @@ export function CesiumMap() {
         v.flyTo(entity, {
           duration: 1.5,
           offset: new HeadingPitchRange(0, CesiumMath.toRadians(-40), 3000),
-        }).catch(() => {});
+        }).catch(() => { });
       }
     } else if (viewLevel === "building" && selectedTractId) {
       const entity = tractEntityMapRef.current.get(selectedTractId);
@@ -268,7 +280,7 @@ export function CesiumMap() {
         v.flyTo(entity, {
           duration: 1.5,
           offset: new HeadingPitchRange(0, CesiumMath.toRadians(-25), 500),
-        }).catch(() => {});
+        }).catch(() => { });
       }
     }
   }, [viewLevel, selectedCountyFips, selectedTractId]); // eslint-disable-line react-hooks/exhaustive-deps
