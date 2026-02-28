@@ -56,11 +56,27 @@ echo "=== Step 8/9: Join and enrich all data ==="
 python join_and_enrich.py
 
 echo ""
-echo "=== Step 9/10: Generate county-level aggregates ==="
+echo "=== Step 9/12: Process industrial sector data to county level ==="
+python process_industry.py
+
+echo ""
+echo "=== Step 10/12: Process certified businesses to county level ==="
+python process_certified_biz.py
+
+echo ""
+echo "=== Step 11/14: Generate county-level aggregates ==="
 python generate_counties.py
 
 echo ""
-echo "=== Step 10/10: Fetch OSM road geometry ==="
+echo "=== Step 12/14: Fetch municipality boundaries ==="
+python fetch_municipalities.py
+
+echo ""
+echo "=== Step 13/14: Join industrial data to municipalities ==="
+python process_municipalities.py
+
+echo ""
+echo "=== Step 14/14: Fetch OSM road geometry ==="
 python fetch_roads.py
 
 echo ""

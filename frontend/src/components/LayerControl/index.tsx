@@ -45,6 +45,7 @@ function Section({ title }: { title: string }) {
 
 export function LayerControl() {
   const {
+    showMunicipalities, toggleMunicipalities,
     showBuildings, toggleBuildings,
     showTracts, toggleTracts,
     showSatellites, toggleSatellites,
@@ -69,6 +70,7 @@ export function LayerControl() {
         <Section title="BASE" />
         <Toggle label="3D Buildings" checked={showBuildings} onChange={toggleBuildings} />
         <Toggle label="Census Tracts" checked={showTracts} onChange={toggleTracts} />
+        <Toggle label="Municipalities" checked={showMunicipalities} onChange={toggleMunicipalities} color="#7dd3fc" />
 
         <Section title="SPACE" />
         <Toggle label="🛰 Satellites" checked={showSatellites} onChange={toggleSatellites} color="#00ffcc" />

@@ -22,6 +22,7 @@ VARS = {
     "B17001_002E": "poverty_count",
     "B23025_005E": "unemployed",
     "B01003_001E": "population",
+    "B25077_001E": "median_home_value",
 }
 
 OUT_PATH = pathlib.Path(__file__).parent / "data" / "nj_acs.csv"
@@ -88,6 +89,7 @@ def main():
         "population",
         "poverty_rate",
         "unemployment_rate",
+        "median_home_value",
     ]
     df = df[keep]
 

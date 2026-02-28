@@ -3,8 +3,10 @@ import type { VariableKey } from "../types/variables";
 import type { ViewLevel } from "../types/navigation";
 import type { TractProperties } from "../types/tract";
 import type { BuildingProperties } from "../types/building";
+import type { MunicipalityProperties } from "../types/municipality";
 
 export type VisualMode = "default" | "crt" | "nightvision" | "flir" | "noir" | "anime" | "highcontrast";
+export type SkyMode = "sunny" | "cloudy" | "dusk" | "night";
 
 export interface TrackedFlightInfo {
   icao24: string;
@@ -14,6 +16,15 @@ export interface TrackedFlightInfo {
   heading: number;   // degrees
   onGround: boolean;
   isMilitary: boolean;
+}
+
+export interface WeatherData {
+  temp: number;
+  windSpeed: number;
+  windDirection: number;
+  cloudCover: number;
+  precipitation: number; // mm
+  condition: string;
 }
 
 interface MapStore {
@@ -33,6 +44,13 @@ interface MapStore {
   // --- Variable selection ---
   activeVariable: VariableKey;
   setActiveVariable: (v: VariableKey) => void;
+
+  // --- Municipality inspect ---
+  selectedMunicipalityProps: MunicipalityProperties | null;
+  setSelectedMunicipality: (props: MunicipalityProperties | null) => void;
+
+  showMunicipalities: boolean;
+  toggleMunicipalities: () => void;
 
   // --- Layer toggles ---
   showBuildings: boolean;
@@ -77,6 +95,16 @@ interface MapStore {
   setVisualIntensity: (v: number) => void;
   visualNoise: number;        // 0..1
   setVisualNoise: (v: number) => void;
+
+  // --- Sky Mode ---
+  skyMode: SkyMode;
+  setSkyMode: (mode: SkyMode) => void;
+
+  // --- Weather ---
+  weatherData: WeatherData | null;
+  setWeatherData: (data: WeatherData | null) => void;
+  showLiveWeather: boolean;
+  toggleLiveWeather: () => void;
 
   // --- Flythrough ---
   isFlythroughActive: boolean;
@@ -138,6 +166,12 @@ export const useMapStore = create<MapStore>((set) => ({
   activeVariable: "median_income",
   setActiveVariable: (v) => set({ activeVariable: v }),
 
+  selectedMunicipalityProps: null,
+  setSelectedMunicipality: (props) => set({ selectedMunicipalityProps: props }),
+
+  showMunicipalities: true,
+  toggleMunicipalities: () => set((s) => ({ showMunicipalities: !s.showMunicipalities })),
+
   showBuildings: true,
   toggleBuildings: () => set((s) => ({ showBuildings: !s.showBuildings })),
 
@@ -177,6 +211,14 @@ export const useMapStore = create<MapStore>((set) => ({
   setVisualIntensity: (v) => set({ visualIntensity: v }),
   visualNoise: 0.15,
   setVisualNoise: (v) => set({ visualNoise: v }),
+
+  skyMode: "sunny",
+  setSkyMode: (mode) => set({ skyMode: mode }),
+
+  weatherData: null,
+  setWeatherData: (data) => set({ weatherData: data }),
+  showLiveWeather: false,
+  toggleLiveWeather: () => set((s) => ({ showLiveWeather: !s.showLiveWeather })),
 
   isFlythroughActive: false,
   toggleFlythrough: () => set((s) => ({ isFlythroughActive: !s.isFlythroughActive, isOrbitActive: false })),

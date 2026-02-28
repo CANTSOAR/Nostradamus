@@ -11,6 +11,8 @@ const INTERPOLATORS: Record<string, InterpolatorFn> = {
   RdYlGn: chromatic.interpolateRdYlGn,
   OrRd: chromatic.interpolateOrRd,
   Blues: chromatic.interpolateBlues,
+  YlGnBu: chromatic.interpolateYlGnBu,
+  Purples: chromatic.interpolatePurples,
 };
 
 export interface ColorScale {

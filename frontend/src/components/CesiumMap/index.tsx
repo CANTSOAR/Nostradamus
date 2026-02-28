@@ -28,14 +28,19 @@ import {
   Rectangle,
   Cartographic,
   Matrix4,
+  CloudCollection,
+  CloudType,
 } from "cesium";
 import type { TractProperties } from "../../types/tract";
 import type { BuildingProperties } from "../../types/building";
+import type { MunicipalityProperties } from "../../types/municipality";
+import { useMunicipalities } from "../../hooks/useMunicipalities";
 import { useMapStore } from "../../store/useMapStore";
 import { useChoropleth } from "../../hooks/useChoropleth";
 import { useSatellites } from "../../hooks/useSatellites";
 import { useFlights } from "../../hooks/useFlights";
 import type { FlightState } from "../../hooks/useFlights";
+import { useWeather } from "../../hooks/useWeather";
 import CesiumNavigation from "cesium-navigation-es6";
 
 // NJ centroid at state overview altitude
@@ -164,6 +169,47 @@ const SHADERS = {
       color.rgb = (color.rgb - 0.5) * 1.5 + 0.5;
       out_FragColor = vec4(color.rgb, 1.0);
     }
+  `,
+  rain: `
+    uniform sampler2D colorTexture;
+    uniform float u_intensity;
+    in vec2 v_textureCoordinates;
+    float hash(float n) { return fract(sin(n) * 43758.5453); }
+    void main() {
+      vec4 color = texture(colorTexture, v_textureCoordinates);
+      vec2 uv = v_textureCoordinates;
+      float time = czm_frameNumber * 0.1;
+      float rain = 0.0;
+      for(int i=0; i<3; i++) {
+        vec2 rv = uv + vec2(0.0, time * (1.0 + float(i)*0.2));
+        rv.x *= 100.0;
+        rv.y *= 20.0;
+        if(hash(floor(rv.x) + floor(rv.y)*10.0) > (1.0 - u_intensity * 0.1)) {
+           rain += 0.2;
+        }
+      }
+      out_FragColor = mix(color, vec4(0.7, 0.7, 0.8, 1.0), rain * u_intensity);
+    }
+  `,
+  snow: `
+    uniform sampler2D colorTexture;
+    uniform float u_intensity;
+    in vec2 v_textureCoordinates;
+    float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+    void main() {
+      vec4 color = texture(colorTexture, v_textureCoordinates);
+      vec2 uv = v_textureCoordinates;
+      float time = czm_frameNumber * 0.02;
+      float snow = 0.0;
+      for(int i=0; i<5; i++) {
+        vec2 p = uv + vec2(sin(time + float(i)), time * (0.5 + float(i)*0.1));
+        p *= (20.0 + float(i)*10.0);
+        if(hash(floor(p)) > (0.99 - u_intensity * 0.01)) {
+          snow += 0.5;
+        }
+      }
+      out_FragColor = mix(color, vec4(1.0, 1.0, 1.0, 1.0), snow * u_intensity);
+    }
   `
 };
 
@@ -260,6 +306,7 @@ export function CesiumMap() {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<Viewer | null>(null);
   const tilesetRef = useRef<Cesium3DTileset | null>(null);
+  const cloudCollectionRef = useRef<CloudCollection | null>(null);
   const handlerRef = useRef<ScreenSpaceEventHandler | null>(null);
   const initDoneRef = useRef(false);
   const [tilesetError, setTilesetError] = useState<string | null>(null);
@@ -282,6 +329,7 @@ export function CesiumMap() {
   const {
     activeVariable, showBuildings, showTracts, viewLevel,
     selectedCountyFips, selectedTractId, visualMode,
+    selectedMunicipalityProps,
     isFlythroughActive,
     navigateToState, navigateToCounty, navigateToTract, navigateToBuilding,
     showSatellites, showFlights, showMilitaryFlights, showTraffic,
@@ -290,7 +338,14 @@ export function CesiumMap() {
     trackedSatelliteId, trackedFlightIcao,
     viewPreset,
     isOrbitActive,
+    skyMode,
+    weatherData,
+    showMunicipalities, setSelectedMunicipality,
+    showLiveWeather,
   } = useMapStore();
+
+  // Weather polling hook
+  useWeather();
 
   // --- Live data hooks ---
   const satellites = useSatellites(showSatellites, detectionMode);
@@ -316,15 +371,10 @@ export function CesiumMap() {
     v.scene.screenSpaceCameraController.enableTranslate = true;
 
     v.scene.backgroundColor = Color.fromCssColorString("#020408");
-    if (v.scene.skyAtmosphere) {
-      v.scene.skyAtmosphere.hueShift = 0.3;
-      v.scene.skyAtmosphere.saturationShift = 0.3;
-      v.scene.skyAtmosphere.brightnessShift = -0.3;
-    }
     v.scene.globe.enableLighting = true;
     v.scene.globe.showGroundAtmosphere = true;
     v.scene.fog.enabled = true;
-    v.scene.globe.depthTestAgainstTerrain = true;
+    v.scene.globe.depthTestAgainstTerrain = false;
     v.scene.shadowMap.enabled = true;
     v.scene.postProcessStages.fxaa.enabled = true;
 
@@ -396,10 +446,16 @@ export function CesiumMap() {
         v.scene.primitives.add(tileset);
         tileset.maximumScreenSpaceError = 16;
         tileset.show = true;
+        // Hide the default globe to avoid clipping and Z-fighting with Google 3D Tiles
+        v.scene.globe.show = false;
         setTilesetError(null);
       })
       .catch((err: unknown) => {
         if (v.isDestroyed() || viewerRef.current !== v) return;
+
+        // Show globe fallback if tileset fails
+        v.scene.globe.show = true;
+
         const msg = err instanceof Error ? err.message : String(err);
         setTilesetError(
           msg.includes("403") || msg.includes("401")
@@ -407,6 +463,11 @@ export function CesiumMap() {
             : `Photorealistic 3D Tiles failed: ${msg}`
         );
       });
+
+    // Cloud Collection init
+    const clouds = new CloudCollection();
+    v.scene.primitives.add(clouds);
+    cloudCollectionRef.current = clouds;
 
     return () => {
       if (!v.isDestroyed()) v.destroy();
@@ -428,6 +489,104 @@ export function CesiumMap() {
   useEffect(() => {
     if (tilesetRef.current) tilesetRef.current.show = true;
   }, [showBuildings, viewLevel]);
+
+  // Sync Sky Mode
+  useEffect(() => {
+    const v = viewerRef.current;
+    if (!v) return;
+
+    const { scene } = v;
+    const { skyAtmosphere, fog, globe } = scene;
+
+    // Reset defaults
+    scene.backgroundColor = Color.fromCssColorString("#020408");
+    if (skyAtmosphere) {
+      skyAtmosphere.hueShift = 0.0;
+      skyAtmosphere.saturationShift = 0.0;
+      skyAtmosphere.brightnessShift = 0.0;
+    }
+    fog.enabled = true;
+    fog.density = 0.0002;
+    globe.showGroundAtmosphere = true;
+
+    switch (skyMode) {
+      case "sunny":
+        // Default clean look
+        break;
+      case "cloudy":
+        fog.density = 0.0008;
+        if (skyAtmosphere) skyAtmosphere.saturationShift = -0.5;
+        break;
+      case "dusk":
+        if (skyAtmosphere) {
+          skyAtmosphere.hueShift = 0.3;
+          skyAtmosphere.saturationShift = 0.3;
+          skyAtmosphere.brightnessShift = -0.2;
+        }
+        break;
+      case "night":
+        scene.backgroundColor = Color.BLACK;
+        if (skyAtmosphere) {
+          skyAtmosphere.brightnessShift = -0.8;
+          skyAtmosphere.saturationShift = -0.8;
+        }
+        fog.enabled = false;
+        break;
+    }
+  }, [skyMode]);
+
+  // Sync Weather Data to Visuals
+  useEffect(() => {
+    const v = viewerRef.current;
+    if (!v || !showLiveWeather || !weatherData) {
+      if (cloudCollectionRef.current) cloudCollectionRef.current.removeAll();
+      if (stagesRef.current.rain) stagesRef.current.rain.enabled = false;
+      if (stagesRef.current.snow) stagesRef.current.snow.enabled = false;
+      return;
+    }
+
+    // 1. Clouds
+    const clouds = cloudCollectionRef.current;
+    if (clouds) {
+      clouds.removeAll();
+      const count = Math.floor(weatherData.cloudCover / 10);
+      for (let i = 0; i < count; i++) {
+        clouds.add({
+          position: Cartesian3.fromDegrees(
+            -74.4057 + (Math.random() - 0.5) * 0.5,
+            40.0583 + (Math.random() - 0.5) * 0.5,
+            2000 + Math.random() * 1000
+          ),
+          maximumSize: new Cartesian3(800, 300, 400),
+          slice: Math.random(),
+          cloudType: CloudType.CUMULUS,
+        });
+      }
+    }
+
+    // 2. Precipitation
+    const isRain = weatherData.condition.includes("Rain") || weatherData.condition.includes("Drizzle") || weatherData.condition.includes("Showers");
+    const isSnow = weatherData.condition.includes("Snow");
+
+    if (stagesRef.current.rain) {
+      stagesRef.current.rain.enabled = isRain;
+      // @ts-ignore
+      stagesRef.current.rain.uniforms.u_intensity = Math.min(weatherData.precipitation * 2, 1.0);
+    }
+    if (stagesRef.current.snow) {
+      stagesRef.current.snow.enabled = isSnow;
+      // @ts-ignore
+      stagesRef.current.snow.uniforms.u_intensity = Math.min(weatherData.precipitation * 2, 1.0);
+    }
+
+    // 3. Sky Adjustments
+    const { scene } = v;
+    const { skyAtmosphere, fog } = scene;
+    if (weatherData.cloudCover > 50) {
+      fog.density = 0.001;
+      if (skyAtmosphere) skyAtmosphere.saturationShift = -0.7;
+    }
+  }, [weatherData, showLiveWeather]);
 
   // Keyboard: POI shortcuts (Q..T) and ESC to go back to state
   useEffect(() => {
@@ -1055,6 +1214,13 @@ export function CesiumMap() {
     }
   }, [viewPreset, isFlythroughActive]);
 
+  // Municipality overlay
+  const { entityMapRef: munEntityMapRef } = useMunicipalities({
+    viewer: viewerRef.current,
+    show: showMunicipalities,
+    selectedMunGeoid: selectedMunicipalityProps?.mun_geoid ?? null,
+  });
+
   // County/Tract choropleth
   const { entityMapRef: countyEntityMapRef } = useChoropleth({
     viewer: viewerRef.current,
@@ -1165,7 +1331,15 @@ export function CesiumMap() {
 
       if (!entity._featureData) return;
       const data = entity._featureData;
-      if (viewLevel === "state" && data.county_fips) {
+
+      // Municipality click — show sidebar, don't change navigation level
+      if (data.mun_geoid && munEntityMapRef.current.has(data.mun_geoid as string)) {
+        setSelectedMunicipality(data as unknown as MunicipalityProperties);
+        return;
+      }
+
+      // County / tract navigation
+      if (viewLevel === "state" && data.county_fips && !data.GEOID) {
         navigateToCounty(data.county_fips as string, (data.NAME as string) ?? data.county_fips as string);
       } else if (viewLevel === "county" && data.GEOID) {
         navigateToTract(data.GEOID as string, data as unknown as TractProperties);
@@ -1176,7 +1350,7 @@ export function CesiumMap() {
       if (!handler.isDestroyed()) handler.destroy();
       handlerRef.current = null;
     };
-  }, [viewLevel, navigateToState, navigateToCounty, navigateToTract, navigateToBuilding, setTrackedSatelliteId, setTrackedFlightIcao, setTrackedFlightData]);
+  }, [viewLevel, navigateToState, navigateToCounty, navigateToTract, navigateToBuilding, setTrackedSatelliteId, setTrackedFlightIcao, setTrackedFlightData, setSelectedMunicipality]);
 
   return (
     <>

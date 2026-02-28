@@ -2,7 +2,9 @@ export type VariableKey =
   | "median_income"
   | "poverty_rate"
   | "unemployment_rate"
-  | "county_employment";
+  | "county_employment"
+  | "avg_annual_wage"
+  | "certified_biz_count";
 
 export interface VariableConfig {
   key: VariableKey;
@@ -47,6 +49,23 @@ export const VARIABLES: VariableConfig[] = [
     label: "County Employment",
     description: "Annual average employment level by county (BLS QCEW, 2023)",
     colorScheme: "Blues",
+    higherIsBetter: true,
+    format: (v) => v.toLocaleString("en-US", { maximumFractionDigits: 0 }),
+  },
+  {
+    key: "avg_annual_wage",
+    label: "Avg Annual Wage",
+    description: "Weighted average annual wage per private-sector worker by county (NJ DOL, 2023)",
+    colorScheme: "YlGnBu",
+    higherIsBetter: true,
+    format: (v) =>
+      v.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }),
+  },
+  {
+    key: "certified_biz_count",
+    label: "Certified Businesses",
+    description: "Number of NJ state-certified businesses (MBE/WBE/SBE) per county",
+    colorScheme: "Purples",
     higherIsBetter: true,
     format: (v) => v.toLocaleString("en-US", { maximumFractionDigits: 0 }),
   },

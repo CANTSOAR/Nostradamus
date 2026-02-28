@@ -10,6 +10,9 @@ import pathlib
 import geopandas as gpd
 import pandas as pd
 
+INDUSTRY_CSV = pathlib.Path(__file__).parent / "data" / "nj_industry_by_county.csv"
+CERTIFIED_BIZ_CSV = pathlib.Path(__file__).parent / "data" / "nj_certified_biz_by_county.csv"
+
 IN_PATH = (
     pathlib.Path(__file__).parent.parent
     / "frontend"
@@ -92,6 +95,25 @@ def main():
 
     # Add NAME column
     counties["NAME"] = counties["county_fips"].map(NJ_COUNTY_NAMES).fillna("Unknown")
+
+    # --- Join industry data (full detail available at county level) ---
+    if INDUSTRY_CSV.exists():
+        print("Joining industry-by-county data...")
+        industry = pd.read_csv(INDUSTRY_CSV, dtype={"county_fips": str})
+        industry["county_fips"] = industry["county_fips"].str.zfill(3)
+        counties = counties.merge(industry, on="county_fips", how="left")
+        print(f"  Joined industry data for {industry['county_fips'].nunique()} counties")
+    else:
+        print("(Skipping industry data — run process_industry.py to generate it)")
+
+    if CERTIFIED_BIZ_CSV.exists():
+        print("Joining certified business counts...")
+        cert_biz = pd.read_csv(CERTIFIED_BIZ_CSV, dtype={"county_fips": str})
+        cert_biz["county_fips"] = cert_biz["county_fips"].str.zfill(3)
+        counties = counties.merge(cert_biz, on="county_fips", how="left")
+        print(f"  Joined certified biz data for {cert_biz['county_fips'].nunique()} counties")
+    else:
+        print("(Skipping certified biz data — run process_certified_biz.py to generate it)")
 
     print(f"  {len(counties)} county features")
 

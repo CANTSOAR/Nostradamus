@@ -12,6 +12,8 @@ import pandas as pd
 BOUNDARIES = pathlib.Path(__file__).parent / "data" / "nj_tract_boundaries.geojson"
 ACS_CSV = pathlib.Path(__file__).parent / "data" / "nj_acs.csv"
 QCEW_CSV = pathlib.Path(__file__).parent / "data" / "nj_qcew.csv"
+INDUSTRY_CSV = pathlib.Path(__file__).parent / "data" / "nj_industry_by_county.csv"
+CERTIFIED_BIZ_CSV = pathlib.Path(__file__).parent / "data" / "nj_certified_biz_by_county.csv"
 OUT_PATH = (
     pathlib.Path(__file__).parent.parent
     / "frontend"
@@ -19,6 +21,8 @@ OUT_PATH = (
     / "data"
     / "nj_tracts_enriched.geojson"
 )
+BUILDINGS_OUT = OUT_PATH.parent / "nj_buildings_highlight.geojson"
+PARCELS_OUT = OUT_PATH.parent / "nj_parcels_commercial.geojson"
 
 
 def main():
@@ -42,6 +46,9 @@ def main():
     # --- Load New Data ---
     LODES_CSV = pathlib.Path(__file__).parent / "data" / "nj_lodes_summary.csv"
     HUD_CSV = pathlib.Path(__file__).parent / "data" / "nj_hud_rents.csv"
+    BUSINESSES_CSV = pathlib.Path(__file__).parent / "data" / "nj_businesses.csv"
+    BUILDINGS_GEOJSON = pathlib.Path(__file__).parent / "data" / "nj_buildings_overture.geojson"
+    PARCELS_GEOJSON = pathlib.Path(__file__).parent / "data" / "nj_parcels.geojson"
 
     print("Loading LODES data...")
     lodes = pd.read_csv(LODES_CSV, dtype={"GEOID": str})
@@ -52,6 +59,13 @@ def main():
     hud["county_fips"] = hud["county_fips"].str.zfill(3)
     print(f"  {len(hud)} HUD rows")
 
+    print("Loading Business POI data...")
+    biz = pd.read_csv(BUSINESSES_CSV)
+    biz_gdf = gpd.GeoDataFrame(
+        biz, geometry=gpd.points_from_xy(biz.longitude, biz.latitude), crs="EPSG:4326"
+    )
+    print(f"  {len(biz_gdf)} Business POIs")
+    
     # --- Join ACS onto boundaries (on 11-digit GEOID) ---
     gdf["GEOID"] = gdf["GEOID"].astype(str).str.zfill(11)
     acs["GEOID"] = acs["GEOID"].astype(str).str.zfill(11)
@@ -70,14 +84,46 @@ def main():
     # --- Join QCEW and HUD on county portion ---
     merged = merged.merge(qcew, on="county_fips", how="left")
     merged = merged.merge(hud, on="county_fips", how="left")
-    
+
+    # --- Join industry and certified business data (optional) ---
+    if INDUSTRY_CSV.exists():
+        print("Loading industry-by-county data...")
+        industry = pd.read_csv(INDUSTRY_CSV, dtype={"county_fips": str})
+        industry["county_fips"] = industry["county_fips"].str.zfill(3)
+        # Only join scalar columns (skip sector_* detail and top_sector text for tract layer)
+        industry_cols = ["county_fips", "private_establishments", "avg_annual_wage"]
+        merged = merged.merge(industry[industry_cols], on="county_fips", how="left")
+        print(f"  Industry join: {merged['avg_annual_wage'].notna().sum()} tracts with wage data")
+    else:
+        print("(Skipping industry data — run process_industry.py to add it)")
+
+    if CERTIFIED_BIZ_CSV.exists():
+        print("Loading certified business counts...")
+        cert_biz = pd.read_csv(CERTIFIED_BIZ_CSV, dtype={"county_fips": str})
+        cert_biz["county_fips"] = cert_biz["county_fips"].str.zfill(3)
+        merged = merged.merge(cert_biz, on="county_fips", how="left")
+        print(f"  Certified biz join: {merged['certified_biz_count'].notna().sum()} tracts with data")
+    else:
+        print("(Skipping certified biz data — run process_certified_biz.py to add it)")
+
     print(f"  After county-level joins: {merged['county_employment'].notna().sum()} with emp, {merged['rent_2br'].notna().sum()} with rent")
+
+    # --- Spatial Join: Businesses per Tract ---
+    print("Computing business density per tract...")
+    # Ensure merged is a GeoDataFrame and in same CRS as biz_gdf
+    merged = merged.to_crs(biz_gdf.crs)
+    biz_counts = gpd.sjoin(biz_gdf, merged, how="inner", predicate="within")
+    biz_counts_series = biz_counts.groupby("index_right").size()
+    merged["business_count"] = biz_counts_series
+    merged["business_count"] = merged["business_count"].fillna(0)
 
     # --- Ensure consistent types / replace NaN with None ---
     float_cols = [
         "median_income", "poverty_count", "unemployed", "population",
         "poverty_rate", "unemployment_rate", "county_employment",
         "commuter_outflow", "local_job_count", "rent_2br",
+        "median_home_value", "business_count",
+        "private_establishments", "avg_annual_wage", "certified_biz_count",
     ]
     # Also coerce any UEZ-sourced numeric columns
     uez_numeric_prefixes = ("industrial_", "uez_")
@@ -100,6 +146,26 @@ def main():
         print(f"  UEZ join: {len(merged)} tracts after merge")
     else:
         print("(Skipping UEZ data — run fetch_uez.py + join_uez.py to add it)")
+
+    # --- Generate Spatial Layers ---
+    print("Generating building highlight layer...")
+    if BUILDINGS_GEOJSON.exists():
+        buildings = gpd.read_file(BUILDINGS_GEOJSON)
+        # Spatial join buildings to tracts that have business_count > 0
+        busy_tracts = merged[merged["business_count"] > 0]
+        if not busy_tracts.empty and not buildings.empty:
+            buildings_highlight = gpd.sjoin(buildings.to_crs(merged.crs), busy_tracts, how="inner", predicate="within")
+            buildings_highlight.to_file(BUILDINGS_OUT, driver="GeoJSON")
+            print(f"  Saved {len(buildings_highlight)} building footprints to {BUILDINGS_OUT.name}")
+    
+    print("Generating commercial parcel layer...")
+    if PARCELS_GEOJSON.exists():
+        parcels = gpd.read_file(PARCELS_GEOJSON)
+        # Filter for commercial land use codes if available, or just parcels in busy areas
+        if not parcels.empty:
+            # Note: Specific PMOD attribute filter would go here
+            parcels.to_file(PARCELS_OUT, driver="GeoJSON")
+            print(f"  Saved {len(parcels)} parcel boundaries to {PARCELS_OUT.name}")
 
     # --- Write output ---
     print(f"Writing enriched GeoJSON to {OUT_PATH}...")

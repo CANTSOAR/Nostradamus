@@ -8,6 +8,9 @@ import { NavigationBreadcrumb } from "./components/NavigationBreadcrumb";
 import { VisualModeSelector } from "./components/VisualModeSelector";
 import { ViewSelector } from "./components/ViewSelector";
 import { FlightInfoPanel } from "./components/FlightInfoPanel";
+import { MunicipalitySidebar } from "./components/MunicipalitySidebar";
+import { SkyModeSelector } from "./components/SkyModeSelector";
+import { WeatherHUD } from "./components/WeatherHUD";
 
 const panelStyle: React.CSSProperties = {
   background: "rgba(15,20,30,0.85)",
@@ -20,13 +23,14 @@ const panelStyle: React.CSSProperties = {
 };
 
 export default function App() {
-  const { activeVariable, viewLevel, selectedTractId, trackedFlightData } = useMapStore();
+  const { activeVariable, viewLevel, selectedTractId, trackedFlightData, selectedMunicipalityProps } = useMapStore();
 
 
   return (
     <div style={{ width: "100vw", height: "100vh", position: "relative", background: "#020408" }}>
       {/* Globe fills entire viewport */}
       <CesiumMap />
+      <WeatherHUD />
 
       {/* Panoptic HUD Overlays removed */}
 
@@ -63,6 +67,25 @@ export default function App() {
           }}
         >
           <FlightInfoPanel />
+        </div>
+      )}
+
+
+      {/* Municipality info panel — shown when a municipality is clicked */}
+      {selectedMunicipalityProps && (
+        <div
+          style={{
+            ...panelStyle,
+            position: "absolute",
+            top: trackedFlightData ? 260 : 130,
+            left: 16,
+            padding: "14px 16px",
+            width: 280,
+            maxHeight: "calc(100vh - 200px)",
+            overflowY: "auto",
+          }}
+        >
+          <MunicipalitySidebar />
         </div>
       )}
 
@@ -116,7 +139,6 @@ export default function App() {
         <Legend activeVariable={activeVariable} />
       </div>
 
-      {/* Bottom-right: Visual Modes */}
       <div
         style={{
           ...panelStyle,
@@ -124,9 +146,15 @@ export default function App() {
           bottom: 24,
           right: 16,
           padding: "12px 16px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 16,
         }}
       >
-        <VisualModeSelector />
+        <SkyModeSelector />
+        <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 12 }}>
+          <VisualModeSelector />
+        </div>
       </div>
 
       {/* Right panel — level-specific content */}
