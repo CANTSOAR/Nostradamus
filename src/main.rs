@@ -7,6 +7,7 @@ pub mod server;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Mutex;
 
 use state::Global;
@@ -77,6 +78,7 @@ impl SimulationEngine {
                         building_type: b_type,
                         capacity: 100,
                         parcel_id: None,
+                        wealth: 0.0,
                     };
                     if let Some(oid) = org_id {
                         engine.businesses.insert(oid, Business {
@@ -139,15 +141,37 @@ impl SimulationEngine {
             speeds.insert(t.id, t.speed_mph);
         }
         
+        let is_daytime = self.global_state.tick % 1000 < 500; // 500 ticks represents day/night cycle
+        
         for agent in &mut self.agents {
-            if let Some(t_id) = agent.vehicle_id {
-                let speed = *speeds.get(&t_id).unwrap_or(&0.0);
-                // move agent. speed is mph. 1 degree is roughly 69 miles.
-                let degrees_per_tick = speed / 69.0 / 60.0; // distance per tick mapped down
+            let target_id = if is_daytime {
+                agent.employer_building_id.unwrap_or(agent.home_building_id)
+            } else {
+                agent.home_building_id
+            };
+
+            if let Some(target_loc) = self.buildings.get(&target_id) {
+                let target_coord = target_loc.coord;
+                let dx = target_coord.lon - agent.current_coord.lon;
+                let dy = target_coord.lat - agent.current_coord.lat;
+                let dist = (dx * dx + dy * dy).sqrt();
                 
-                let angle = rand::random::<f64>() * std::f64::consts::PI * 2.0;
-                agent.current_coord.lat += angle.sin() * degrees_per_tick;
-                agent.current_coord.lon += angle.cos() * degrees_per_tick;
+                if dist > 0.001 {
+                    if let Some(t_id) = agent.vehicle_id {
+                        let speed = *speeds.get(&t_id).unwrap_or(&0.0);
+                        let degrees_per_tick = speed / 69.0 / 60.0;
+                        
+                        let vx = (dx / dist) * degrees_per_tick;
+                        let vy = (dy / dist) * degrees_per_tick;
+                        
+                        if degrees_per_tick >= dist {
+                            agent.current_coord = target_coord;
+                        } else {
+                            agent.current_coord.lon += vx;
+                            agent.current_coord.lat += vy;
+                        }
+                    }
+                }
             }
         }
     }
@@ -161,10 +185,12 @@ async fn main() {
     // Create the shared state payload
     let shared_payload: Arc<Mutex<Option<SimulationPayload>>> = Arc::new(Mutex::new(None));
     let server_payload_ref = shared_payload.clone();
+    let is_paused = Arc::new(AtomicBool::new(false));
+    let server_paused_ref = is_paused.clone();
     
     // Spawn the WebSocket server in the background
     tokio::spawn(async move {
-        server::start_websocket_server(server_payload_ref).await;
+        server::start_websocket_server(server_payload_ref, server_paused_ref).await;
     });
     
     // Infinite simulation loop
@@ -172,6 +198,11 @@ async fn main() {
     println!("Simulation Started! Booting async loop...");
     loop {
         ticker.tick().await;
+        
+        // Skip updating engine if Paused
+        if is_paused.load(Ordering::SeqCst) {
+            continue;
+        }
         
         engine.tick();
         

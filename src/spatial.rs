@@ -63,6 +63,16 @@ pub struct Building {
     pub building_type: BuildingType,
     pub capacity: u32,
     pub parcel_id: Option<u64>,
+    pub wealth: f64,
+}
+
+impl Building {
+    /// Evaluated Daily, passing in the Organization's economic averages
+    pub fn update_finances(&mut self, base_revenue: f64, base_bills: f64) {
+        let daily_rev = base_revenue / 365.0;
+        let daily_bills = base_bills / 365.0;
+        self.wealth += daily_rev - daily_bills;
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
