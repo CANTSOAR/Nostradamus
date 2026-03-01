@@ -83,6 +83,8 @@ pub enum LocationType {
     Residential,
     Store,
     Employer,
+    /// School (elementary, middle, high, college)
+    School,
     /// Multi-purpose (e.g. mixed-use zoning)
     Mixed,
     /// Public infrastructure like parks or gov buildings

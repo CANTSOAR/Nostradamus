@@ -31,6 +31,11 @@ pub struct Agent {
     // Relationships
     pub home_location_id: u32,
     pub employer_location_id: Option<u32>,
+    /// School/college the agent attends (ages 5-22)
+    pub school_location_id: Option<u32>,
+    /// 0=none, 1=elementary, 2=middle, 3=high, 4=in_college, 5=college_grad
+    pub education_level: u8,
+    pub is_homeowner: bool,
     pub family_agent_ids: Vec<u32>,
 }
 

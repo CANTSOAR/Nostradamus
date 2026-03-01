@@ -56,6 +56,95 @@ pub fn update_agent_age(agent: &mut Agent) {
     agent.age += 1;
 }
 
+/// Monthly housing cost deduction. Renters pay ~8% of home value/year, owners ~4%.
+pub fn update_agent_housing(agent: &mut Agent, home_value: f32) {
+    agent.is_homeowner = agent.wealth > home_value * 0.2 && agent.age >= 18;
+    let annual_rate: f32 = if agent.is_homeowner { 0.04 } else { 0.08 };
+    let monthly_cost = home_value * annual_rate / 12.0;
+    agent.wealth -= monthly_cost;
+}
+
+/// Yearly age transition: school reassignment, workforce entry, retirement.
+/// Called after update_agent_age() increments age.
+pub fn handle_age_transition(
+    agent: &mut Agent,
+    elem: &HashMap<u8, Vec<u32>>,
+    middle: &HashMap<u8, Vec<u32>>,
+    high: &HashMap<u8, Vec<u32>>,
+    college: &HashMap<u8, Vec<u32>>,
+    all_workplaces: &[u32],
+    tick: u64,
+) {
+    let d = agent.destiny;
+    
+    match agent.age {
+        5 => {
+            // Enter elementary school
+            agent.school_location_id = pick_school(elem, agent.county, d);
+            agent.education_level = 1;
+        }
+        11 => {
+            // Enter middle school
+            agent.school_location_id = pick_school(middle, agent.county, d);
+            agent.education_level = 2;
+        }
+        14 => {
+            // Enter high school
+            agent.school_location_id = pick_school(high, agent.county, d);
+            agent.education_level = 3;
+        }
+        18 => {
+            // Graduate high school, ~60% go to college
+            let goes_to_college = fate(d, tick, 2000) < 0.6;
+            if goes_to_college {
+                agent.school_location_id = pick_school(college, agent.county, d);
+                agent.education_level = 4; // In college
+            } else {
+                // Enter workforce
+                agent.school_location_id = None;
+                agent.education_level = 3; // High school grad
+                agent.employer_location_id = pick_random_workplace(all_workplaces, d, tick);
+                if agent.employer_location_id.is_some() {
+                    agent.income = agent.income.max(25000.0); // Min entry-level wage
+                }
+            }
+        }
+        22 => {
+            // Graduate college if enrolled
+            if agent.education_level == 4 {
+                agent.school_location_id = None;
+                agent.education_level = 5; // College grad
+                agent.employer_location_id = pick_random_workplace(all_workplaces, d, tick);
+                if agent.employer_location_id.is_some() {
+                    agent.income = agent.income.max(25000.0) * 1.5; // College premium
+                }
+            }
+        }
+        65 => {
+            // Retirement
+            agent.employer_location_id = None;
+            agent.income *= 0.4; // Retirement income
+        }
+        _ => {}
+    }
+}
+
+/// Pick a random school from tier pool in agent's county.
+fn pick_school(pool: &HashMap<u8, Vec<u32>>, county: u8, destiny: u64) -> Option<u32> {
+    pool.get(&county).and_then(|schools| {
+        if schools.is_empty() { return None; }
+        let idx = (fate(destiny, 0, 33) * schools.len() as f32) as usize % schools.len();
+        Some(schools[idx])
+    })
+}
+
+/// Pick a random workplace from global list.
+fn pick_random_workplace(all_workplaces: &[u32], destiny: u64, tick: u64) -> Option<u32> {
+    if all_workplaces.is_empty() { return None; }
+    let idx = (fate(destiny, tick, 34) * all_workplaces.len() as f32) as usize % all_workplaces.len();
+    Some(all_workplaces[idx])
+}
+
 // ============================================================================
 // HOME MOVING & JOB CHANGING
 // ============================================================================
@@ -441,6 +530,34 @@ pub fn determine_agent_target(
     let hour = tick % 24;
     let is_weekend = day_of_week == 5 || day_of_week == 6;
     
+    // === TODDLERS (0-4): always home ===
+    if agent.age < 5 {
+        return agent.home_location_id;
+    }
+    
+    // === SCHOOL-AGE (5-17) or COLLEGE (education_level == 4): school on weekdays ===
+    if agent.school_location_id.is_some() && (agent.age <= 17 || agent.education_level == 4) {
+        if !is_weekend && hour >= 7 && hour <= 15 {
+            // School hours: 7am-3pm
+            if is_bad_weather && fate(d, tick, 1010) < 0.3 {
+                return agent.home_location_id; // Snow day!
+            }
+            return agent.school_location_id.unwrap();
+        }
+        // After school hours or weekends: home or other
+        if hour >= 15 && hour <= 20 && !is_weekend && fate(d, tick, 1011) < 0.3 {
+            // After-school activities
+            if let Some(locs) = county_destinations.get(&agent.county) {
+                if !locs.is_empty() {
+                    let idx = (fate(d, tick, 1012) * locs.len() as f32) as usize % locs.len();
+                    return locs[idx];
+                }
+            }
+        }
+        return agent.home_location_id;
+    }
+    
+    // === ADULTS: existing work/home/other logic ===
     let mut p_home: f32 = 1.0;
     let mut p_work: f32 = 1.0;
     let mut p_other: f32 = 1.0;
@@ -452,7 +569,7 @@ pub fn determine_agent_target(
     if is_weekend { p_work = 0.0; p_home += 30.0; p_other += 40.0; }
     else { p_work += 40.0; }
     
-    if agent.age >= 75 { p_work = 0.0; p_home += 50.0; p_other += 10.0; }
+    if agent.age >= 65 { p_work = 0.0; p_home += 50.0; p_other += 10.0; }
     
     let has_kids = !agent.family_agent_ids.is_empty();
     if has_kids { p_home += 30.0; p_other -= 5.0; }
@@ -471,7 +588,6 @@ pub fn determine_agent_target(
     } else if roll < p_home + p_work {
         agent.employer_location_id.unwrap_or(agent.home_location_id)
     } else {
-        // Pick a destination in agent's county
         if let Some(locs) = county_destinations.get(&agent.county) {
             if locs.is_empty() { return agent.home_location_id; }
             let idx = (fate(d, tick, 1001) * locs.len() as f32) as usize % locs.len();

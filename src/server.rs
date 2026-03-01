@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 use tokio::sync::Mutex;
 use tokio::net::TcpListener;
 use tokio_tungstenite::accept_async;
@@ -7,22 +7,50 @@ use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 
 use crate::state::Global;
-use crate::entities::{Agent, Organization, Transport};
-use crate::spatial::Location;
+use crate::entities::Agent;
+use crate::spatial::{self, Location};
+
+/// Per-county aggregate stats sent every frame so frontend can show overview panel
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CountyStats {
+    pub county_id: u8,
+    pub name: String,
+    pub population: u32,
+    pub avg_wealth: f32,
+    pub total_location_value: f64,
+    pub num_employers: u32,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimulationPayload {
     pub tick: u64,
     pub global_metrics: Global,
-    pub active_agents_subset: Vec<Agent>,
-    pub locations_subset: Vec<Location>,
-    pub organizations: std::collections::HashMap<u32, Organization>,
-    pub transports: Vec<Transport>,
+    pub viewport_agents: Vec<Agent>,
+    pub viewport_locations: Vec<Location>,
+    pub county_stats: Vec<CountyStats>,
+}
+
+/// Viewport filter state shared between WebSocket reader and payload builder
+#[derive(Debug)]
+pub struct ViewportFilter {
+    pub county: AtomicU8,
+    pub bbox: Mutex<(f32, f32, f32, f32)>, // lat_min, lat_max, lon_min, lon_max
+}
+
+impl Default for ViewportFilter {
+    fn default() -> Self {
+        Self {
+            county: AtomicU8::new(spatial::COUNTY_UNKNOWN),
+            // Default: all of NJ
+            bbox: Mutex::new((38.9, 41.4, -75.6, -73.8)),
+        }
+    }
 }
 
 pub async fn start_websocket_server(
     state: Arc<Mutex<Option<SimulationPayload>>>,
-    paused_flag: Arc<AtomicBool>
+    paused_flag: Arc<std::sync::atomic::AtomicBool>,
+    viewport_filter: Arc<ViewportFilter>,
 ) {
     let addr = "127.0.0.1:8080";
     let listener = TcpListener::bind(&addr).await.expect("Failed to bind WebSocket");
@@ -31,6 +59,7 @@ pub async fn start_websocket_server(
     while let Ok((stream, _)) = listener.accept().await {
         let state_clone = state.clone();
         let paused_clone = paused_flag.clone();
+        let vf_clone = viewport_filter.clone();
         
         tokio::spawn(async move {
             if let Ok(ws_stream) = accept_async(stream).await {
@@ -38,18 +67,31 @@ pub async fn start_websocket_server(
                 
                 let (mut tx, mut rx) = ws_stream.split();
                 
-                // Spawn a reader task to listen for UI commands
                 let paused_rx = paused_clone.clone();
+                let vf_rx = vf_clone.clone();
                 tokio::spawn(async move {
                     while let Some(msg) = rx.next().await {
                         if let Ok(m) = msg {
                             if let Ok(text) = m.into_text() {
+                                let text = text.trim();
                                 if text == "pause" {
                                     paused_rx.store(true, Ordering::SeqCst);
                                     println!("Engine Paused by UI");
                                 } else if text == "resume" {
                                     paused_rx.store(false, Ordering::SeqCst);
                                     println!("Engine Resumed by UI");
+                                } else if let Some(county_name) = text.strip_prefix("county:") {
+                                    let cid = spatial::county_to_id(county_name.trim());
+                                    vf_rx.county.store(cid, Ordering::SeqCst);
+                                    println!("County filter set to: {} ({})", county_name.trim(), cid);
+                                } else if let Some(bbox_str) = text.strip_prefix("viewport:") {
+                                    let parts: Vec<f32> = bbox_str.split(',')
+                                        .filter_map(|s| s.trim().parse().ok())
+                                        .collect();
+                                    if parts.len() == 4 {
+                                        let mut bbox = vf_rx.bbox.lock().await;
+                                        *bbox = (parts[0], parts[1], parts[2], parts[3]);
+                                    }
                                 }
                             }
                         }
