@@ -120,9 +120,86 @@ def compute_county_median_values():
 
 
 def build_residential_locations(writer, centroids, county_medians):
-    """Process 2.7M property tax records into residential locations."""
-    tax_file = os.path.join(RAW_DIR, 'NJ_Property_Taxes_2024.csv')
+    """Process geocoded property records into residential locations.
     
+    Uses NJ_Property_Geocoded_Final.csv for real geocoded coordinates.
+    Falls back to municipality centroid + jitter when coords are missing.
+    """
+    geocoded_file = os.path.join(RAW_DIR, 'NJ_Property_Geocoded_Final.csv')
+    
+    if not os.path.exists(geocoded_file):
+        print("  ERROR: NJ_Property_Geocoded_Final.csv not found!")
+        print("  Falling back to NJ_Property_Taxes_2024.csv with centroid jitter...")
+        return _build_residential_from_old_tax_file(writer, centroids)
+    
+    written = 0
+    skipped = 0
+    geocoded = 0
+    centroid_fallback = 0
+    
+    with open(geocoded_file, 'r') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            county = row.get('county', '').strip()
+            city = row.get('city', '').strip()
+            address = row.get('address', '').strip()
+            
+            try:
+                value = float(row.get('net_value', 0))
+                tax_rate = float(row.get('tax_rate', 0))
+                tax_amount = float(row.get('tax_amount', 0))
+            except (ValueError, KeyError):
+                skipped += 1
+                continue
+            
+            if value <= 0:
+                skipped += 1
+                continue
+            
+            # Try real geocoded coordinates first
+            try:
+                lat = float(row.get('latitude', ''))
+                lon = float(row.get('longitude', ''))
+                if lat != 0 and lon != 0 and 38.5 < lat < 42.0 and -76.0 < lon < -73.5:
+                    geocoded += 1
+                else:
+                    raise ValueError("out of NJ range")
+            except (ValueError, TypeError):
+                # Fallback to centroid jitter
+                key = f"{county}|{city}"
+                centroid = centroids.get(key)
+                if not centroid or centroid.get('lat') is None:
+                    skipped += 1
+                    continue
+                lat = centroid['lat'] + random.uniform(-0.005, 0.005)
+                lon = centroid['lon'] + random.uniform(-0.005, 0.005)
+                centroid_fallback += 1
+            
+            writer.writerow({
+                'lat': round(lat, 6),
+                'lon': round(lon, 6),
+                'org_id': '',
+                'type': 'Residential',
+                'name': address,
+                'value': round(value, 2),
+                'tax': round(tax_amount, 2),
+                'county': county,
+            })
+            written += 1
+            
+            if written % 250000 == 0:
+                print(f"  Residential: {written:,} written ({geocoded:,} geocoded, {centroid_fallback:,} centroid fallback)")
+    
+    print(f"  Residential DONE: {written:,} written")
+    print(f"    Geocoded:         {geocoded:,} ({100*geocoded/max(written,1):.1f}%)")
+    print(f"    Centroid fallback: {centroid_fallback:,}")
+    print(f"    Skipped:          {skipped:,}")
+    return written
+
+
+def _build_residential_from_old_tax_file(writer, centroids):
+    """Legacy fallback: build from NJ_Property_Taxes_2024.csv using centroid jitter."""
+    tax_file = os.path.join(RAW_DIR, 'NJ_Property_Taxes_2024.csv')
     written = 0
     skipped = 0
     
@@ -132,46 +209,29 @@ def build_residential_locations(writer, centroids, county_medians):
             county = row['COUNTY'].strip()
             mun = row['MUN_NAME'].strip()
             address = row['PROP_LOC'].strip()
-            
             try:
                 value = float(row['NET_VALUE'])
                 tax = float(row['TAX_2024'])
             except (ValueError, KeyError):
                 skipped += 1
                 continue
-            
             if value <= 0:
                 skipped += 1
                 continue
-            
-            # Look up municipality centroid
             key = f"{county}|{mun}"
             centroid = centroids.get(key)
-            
             if not centroid or centroid.get('lat') is None:
                 skipped += 1
                 continue
-            
-            # Add random jitter: ±0.005° ≈ ±500m
             lat = centroid['lat'] + random.uniform(-0.005, 0.005)
             lon = centroid['lon'] + random.uniform(-0.005, 0.005)
-            
             writer.writerow({
-                'lat': round(lat, 6),
-                'lon': round(lon, 6),
-                'org_id': '',
-                'type': 'Residential',
-                'name': address,
-                'value': round(value, 2),
-                'tax': round(tax, 2),
-                'county': county,
+                'lat': round(lat, 6), 'lon': round(lon, 6),
+                'org_id': '', 'type': 'Residential', 'name': address,
+                'value': round(value, 2), 'tax': round(tax, 2), 'county': county,
             })
             written += 1
-            
-            if written % 100000 == 0:
-                print(f"  Residential: {written:,} written, {skipped:,} skipped")
-    
-    print(f"  Residential DONE: {written:,} written, {skipped:,} skipped")
+    print(f"  Residential (legacy): {written:,} written, {skipped:,} skipped")
     return written
 
 
