@@ -341,6 +341,10 @@ export function CesiumMap() {
       geocoder: false, homeButton: false, infoBox: false,
       navigationHelpButton: false, sceneModePicker: false,
       selectionIndicator: false, timeline: false, creditContainer: creditDiv,
+      // @ts-ignore
+      additionalOptions: {
+        onlyUsingWithGoogleGeocoder: true
+      }
     });
 
     v.scene.screenSpaceCameraController.enableZoom = true;

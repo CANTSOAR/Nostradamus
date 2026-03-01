@@ -65,7 +65,7 @@ export function BusinessInfoPanel({ business }: BusinessInfoPanelProps) {
         <div style={{ background: "rgba(255,255,255,0.04)", borderRadius: 6, padding: "7px 9px", gridColumn: "1 / -1" }}>
           <div style={{ fontSize: 9, color: "#475569", letterSpacing: "0.08em" }}>LOCATION</div>
           <div style={{ fontSize: 11, fontWeight: 500, color: "#94a3b8", marginTop: 2, fontVariantNumeric: "tabular-nums" }}>
-            {b.lat.toFixed(5)}, {b.lon.toFixed(5)}
+            {b.lat?.toFixed(5) ?? "0.00000"}, {b.lon?.toFixed(5) ?? "0.00000"}
           </div>
         </div>
       </div>

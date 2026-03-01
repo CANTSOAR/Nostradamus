@@ -28,6 +28,7 @@ pub struct SimulationPayload {
     pub viewport_agents: Vec<Agent>,
     pub viewport_locations: Vec<Location>,
     pub county_stats: Vec<CountyStats>,
+    pub state_entity: crate::entities::StateEntity,
 }
 
 /// Viewport filter state shared between WebSocket reader and payload builder

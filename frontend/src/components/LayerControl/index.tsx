@@ -44,6 +44,8 @@ function Section({ title }: { title: string }) {
 }
 
 import { VARIABLES } from "../../types/variables";
+import { useState } from "react";
+import { Search } from "lucide-react";
 
 export function LayerControl() {
   const {
@@ -74,18 +76,51 @@ export function LayerControl() {
 
   const munOptions = VARIABLES.filter(v => v.group && (v.group in groups || v.group.startsWith("municipality_")));
 
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const layers = [
+    { section: "BASE", label: "3D Buildings", checked: showBuildings, onChange: toggleBuildings, show: true },
+    { section: "BASE", label: "Census Tracts", checked: showTracts, onChange: toggleTracts, show: true },
+    { section: "BASE", label: "Municipalities", checked: showMunicipalities, onChange: toggleMunicipalities, color: "#7dd3fc", show: true },
+    { section: "SPACE", label: "🛰 Satellites", checked: showSatellites, onChange: toggleSatellites, color: "#00ffcc", show: true },
+    { section: "AVIATION", label: "✈ Flights", checked: showFlights, onChange: toggleFlights, color: "#60a5fa", show: true },
+    { section: "AVIATION", label: "🟠 Military", checked: showMilitaryFlights, onChange: toggleMilitaryFlights, color: "#f97316", show: true },
+    { section: "GROUND", label: "🏢 Business POIs", checked: showBusinesses, onChange: toggleBusinesses, color: "#f43f5e", show: true },
+    { section: "GROUND", label: "💎 Property Atlas", checked: showProperties, onChange: toggleProperties, color: "#94d2bd", show: true },
+    { section: "GROUND", label: "🚗 NJ Traffic", checked: showTraffic, onChange: toggleTraffic, color: "#facc15", show: true },
+    { section: "GROUND", label: "📹 CCTV Cams", checked: showCCTV, onChange: toggleCCTV, color: "#a855f7", show: true },
+    { section: "CAMERA", label: "⟳ Orbit Mode", checked: isOrbitActive, onChange: toggleOrbit, color: "#94d2bd", show: true },
+    { section: "CAMERA", label: "🚁 Drone Flythrough", checked: isFlythroughActive, onChange: toggleFlythrough, color: "#818cf8", show: true },
+  ];
+
+  const filteredLayers = layers.filter(layer => layer.label.toLowerCase().includes(searchQuery.toLowerCase()) || layer.section.toLowerCase().includes(searchQuery.toLowerCase()));
+
+  const hasSection = (sectionName: string) => filteredLayers.some(l => l.section === sectionName);
+  const renderLayer = (label: string) => {
+    const layer = filteredLayers.find(l => l.label === label);
+    if (!layer) return null;
+    return <Toggle label={layer.label} checked={layer.checked} onChange={layer.onChange} color={layer.color} />;
+  };
+
   return (
     <div>
-      <div style={{ fontSize: 10, color: "#64748b", letterSpacing: "0.1em", fontWeight: 600, marginBottom: 8 }}>
-        LAYERS
+      <div style={{ display: 'flex', alignItems: 'center', background: 'rgba(15,23,42,0.8)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, padding: '4px 8px', marginBottom: 12 }}>
+        <Search size={14} color="#64748b" style={{ marginRight: 8 }} />
+        <input
+          type="text"
+          placeholder="Search layers..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          style={{ background: 'transparent', border: 'none', color: '#e2e8f0', fontSize: 11, outline: 'none', width: '100%' }}
+        />
       </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        <Section title="BASE" />
-        <Toggle label="3D Buildings" checked={showBuildings} onChange={toggleBuildings} />
-        <Toggle label="Census Tracts" checked={showTracts} onChange={toggleTracts} />
-        <Toggle label="Municipalities" checked={showMunicipalities} onChange={toggleMunicipalities} color="#7dd3fc" />
-        {showMunicipalities && (
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: '50vh', overflowY: 'auto' }}>
+        {hasSection("BASE") && <Section title="BASE" />}
+        {renderLayer("3D Buildings")}
+        {renderLayer("Census Tracts")}
+        {renderLayer("Municipalities")}
+        {showMunicipalities && filteredLayers.some(l => l.label === "Municipalities") && (
           <div style={{ marginLeft: 38, marginTop: -2 }}>
             <select
               value={activeMunVariable}
@@ -113,9 +148,9 @@ export function LayerControl() {
           </div>
         )}
 
-        <Section title="SPACE" />
-        <Toggle label="🛰 Satellites" checked={showSatellites} onChange={toggleSatellites} color="#00ffcc" />
-        {showSatellites && (
+        {hasSection("SPACE") && <Section title="SPACE" />}
+        {renderLayer("🛰 Satellites")}
+        {showSatellites && filteredLayers.some(l => l.label === "🛰 Satellites") && (
           <div style={{ display: "flex", gap: 4, marginLeft: 16 }}>
             {(["sparse", "full"] as const).map((m) => (
               <button
@@ -145,10 +180,10 @@ export function LayerControl() {
           </div>
         )}
 
-        <Section title="AVIATION" />
-        <Toggle label="✈ Flights" checked={showFlights} onChange={toggleFlights} color="#60a5fa" />
-        <Toggle label="🟠 Military" checked={showMilitaryFlights} onChange={toggleMilitaryFlights} color="#f97316" />
-        {(showFlights || showMilitaryFlights) && trackedFlightIcao && (
+        {hasSection("AVIATION") && <Section title="AVIATION" />}
+        {renderLayer("✈ Flights")}
+        {renderLayer("🟠 Military")}
+        {(showFlights || showMilitaryFlights) && trackedFlightIcao && filteredLayers.some(l => l.section === "AVIATION") && (
           <button
             onClick={() => setTrackedFlightIcao(null)}
             style={{
@@ -161,22 +196,22 @@ export function LayerControl() {
           </button>
         )}
 
-        <Section title="GROUND" />
-        <Toggle label="🏢 Business POIs" checked={showBusinesses} onChange={toggleBusinesses} color="#f43f5e" />
-        <Toggle label="💎 Property Atlas" checked={showProperties} onChange={toggleProperties} color="#94d2bd" />
-        <Toggle label="🚗 NJ Traffic" checked={showTraffic} onChange={toggleTraffic} color="#facc15" />
-        <Toggle label="📹 CCTV Cams" checked={showCCTV} onChange={toggleCCTV} color="#a855f7" />
+        {hasSection("GROUND") && <Section title="GROUND" />}
+        {renderLayer("🏢 Business POIs")}
+        {renderLayer("💎 Property Atlas")}
+        {renderLayer("🚗 NJ Traffic")}
+        {renderLayer("📹 CCTV Cams")}
 
-        <Section title="CAMERA" />
-        <Toggle label="⟳ Orbit Mode" checked={isOrbitActive} onChange={toggleOrbit} color="#94d2bd" />
-        {isOrbitActive && (
+        {hasSection("CAMERA") && <Section title="CAMERA" />}
+        {renderLayer("⟳ Orbit Mode")}
+        {isOrbitActive && filteredLayers.some(l => l.label === "⟳ Orbit Mode") && (
           <div style={{ fontSize: 9, color: "#64748b", marginLeft: 16, lineHeight: 1.5 }}>
             Click ground → new pivot<br />
             Scroll → zoom
           </div>
         )}
-        <Toggle label="🚁 Drone Flythrough" checked={isFlythroughActive} onChange={toggleFlythrough} color="#818cf8" />
-        {isFlythroughActive && (
+        {renderLayer("🚁 Drone Flythrough")}
+        {isFlythroughActive && filteredLayers.some(l => l.label === "🚁 Drone Flythrough") && (
           <div style={{ fontSize: 9, color: "#64748b", marginLeft: 16, lineHeight: 1.5 }}>
             Click map → capture mouse<br />
             WASD · Space/C · Shift=fast

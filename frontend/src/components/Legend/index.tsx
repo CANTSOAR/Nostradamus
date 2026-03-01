@@ -30,9 +30,9 @@ export function Legend({ activeVariable }: LegendProps) {
   }, [config]);
 
   return (
-    <div style={{ minWidth: 190 }}>
-      <div style={{ fontSize: 10, color: "#64748b", letterSpacing: "0.1em", fontWeight: 600, marginBottom: 8 }}>
-        {config.label.toUpperCase()}
+    <div style={{ minWidth: 190, paddingTop: 4 }}>
+      <div style={{ fontSize: 11, color: "#e2e8f0", fontWeight: 600, marginBottom: 8 }}>
+        {config.label}
       </div>
 
       {/* Color ramp */}
@@ -55,12 +55,12 @@ export function Legend({ activeVariable }: LegendProps) {
         </span>
       </div>
 
-      <div style={{ fontSize: 10, color: "#334155", marginTop: 6, display: "flex", alignItems: "center", gap: 4 }}>
-        <div style={{ width: 10, height: 10, background: "#222831", borderRadius: 2, flexShrink: 0 }} />
+      <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 8, display: "flex", alignItems: "center", gap: 6 }}>
+        <div style={{ width: 12, height: 12, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 3, flexShrink: 0 }} />
         <span>No data</span>
       </div>
 
-      <div style={{ fontSize: 9, color: "#1e293b", marginTop: 4 }}>
+      <div style={{ fontSize: 10, color: "#64748b", marginTop: 8, lineHeight: 1.4 }}>
         {config.description}
       </div>
     </div>

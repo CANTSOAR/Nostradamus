@@ -10,14 +10,16 @@ export function SimulationLayer() {
     const primitivesRef = useRef<Cesium.PointPrimitiveCollection | null>(null);
 
     useEffect(() => {
-        if (!viewer) return;
+        if (!viewer || viewer.isDestroyed()) return;
 
         const primitives = new Cesium.PointPrimitiveCollection();
         viewer.scene.primitives.add(primitives);
         primitivesRef.current = primitives;
 
         return () => {
-            viewer.scene.primitives.remove(primitives);
+            if (viewer && !viewer.isDestroyed()) {
+                viewer.scene.primitives.remove(primitives);
+            }
         };
     }, [viewer]);
 

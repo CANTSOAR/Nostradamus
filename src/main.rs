@@ -5,6 +5,7 @@ pub mod server;
 pub mod updates;
 pub mod metrics;
 pub mod commands;
+pub mod groq;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -15,7 +16,7 @@ use rayon::prelude::*;
 
 use state::Global;
 use spatial::Location;
-use entities::{Agent, Organization, Transport, Weather, StateEntity};
+use entities::{Agent, Organization, Transport, Weather, StateEntity, Property};
 use server::{SimulationPayload, ViewportFilter, CountyStats};
 use serde::Deserialize;
 
@@ -55,10 +56,13 @@ struct CsvCountyDemographics {
     county: String,
     total_population: u32,
     median_household_income: f64,
+    #[serde(rename = "median_age")]
     _median_age: f64,
     avg_household_size: f64,
+    #[serde(rename = "pct_under_18")]
     _pct_under_18: f64,
     pct_18_to_34: f64,
+    #[serde(rename = "pct_35_to_64")]
     _pct_35_to_64: f64,
     pct_65_plus: f64,
     vacancy_rate: f64,
@@ -130,6 +134,8 @@ pub struct SimulationEngine {
     pub metrics: Option<metrics::MetricsCollector>,
     
     pub maps_dirty: bool,
+    pub groq_client: groq::GroqClient,
+    pub properties: Vec<Property>,
 }
 
 impl SimulationEngine {
@@ -160,6 +166,8 @@ impl SimulationEngine {
             county_stats_cache: Vec::new(),
             metrics: metrics::MetricsCollector::new(),
             maps_dirty: true,
+            groq_client: groq::GroqClient::new(),
+            properties: Vec::new(),
         };
 
         // ====================================================
@@ -356,7 +364,25 @@ impl SimulationEngine {
         let mut total_generated: u32 = 0;
         let mut agent_destiny_seed: u64 = 0xCAFE_DEAD_BEEF_1234;
 
-        let county_ids: Vec<u8> = county_home_values.keys().copied().collect();
+        // -- SCOPE FILTER --
+        // List of county IDs to actually simulate.  Middlesex = 11 (New Brunswick).
+        // Add more IDs here to expand the simulation region.
+        const SIMULATED_COUNTIES: &[u8] = &[11]; // 11 = MIDDLESEX
+
+        // Global agent cap — prevents OOM.  Proportioned against simulated counties only.
+        const MAX_AGENTS: u32 = 500_000;
+        let total_census_pop: u32 = county_profiles
+            .iter()
+            .filter(|(id, _)| SIMULATED_COUNTIES.contains(id))
+            .map(|(_, p)| p.population)
+            .sum();
+
+        // Only iterate counties we want to simulate.
+        let county_ids: Vec<u8> = county_home_values
+            .keys()
+            .copied()
+            .filter(|id| SIMULATED_COUNTIES.contains(id))
+            .collect();
         
         for &county_id in &county_ids {
             let profile = county_profiles.get(&county_id).cloned().unwrap_or_default();
@@ -367,9 +393,19 @@ impl SimulationEngine {
             if homes.is_empty() { continue; }
             
             let county_pop = profile.population;
+            // Scale down county population to fit within global cap
+            let county_target: i64 = if total_census_pop > 0 {
+                (county_pop as f64 / total_census_pop as f64 * MAX_AGENTS as f64).round() as i64
+            } else {
+                county_pop as i64
+            };
             let num_homes = homes.len() as f32;
-            let occupied_homes = ((1.0 - profile.vacancy_rate) * num_homes) as usize;
-            let mut remaining_pop = county_pop as i64;
+            // Max budget of occupied homes based on vacancy rate — used as a soft ceiling.
+            // Actual vacancy is decided per-home via a random roll so vacancies are
+            // distributed across all price tiers, not concentrated at the expensive end.
+            let max_occupied = ((1.0 - profile.vacancy_rate) * num_homes) as usize;
+            let mut remaining_pop = county_target;
+            let mut num_occupied: usize = 0;
             
             // Pre-collect cross-county workplaces accessible from this county
             let commute_row = if (county_id as usize) < 21 {
@@ -381,13 +417,23 @@ impl SimulationEngine {
             };
             
             for (rank, &(home_id, home_value)) in homes.iter().enumerate() {
-                if remaining_pop <= 0 || rank >= occupied_homes { break; }
+                if remaining_pop <= 0 || num_occupied >= max_occupied { break; }
                 
                 let (home_lat, home_lon) = *engine.loc_coords.get(&home_id).unwrap_or(&(40.0, -74.5));
                 let value_pctile = rank as f32 / num_homes;
                 
-                // Household size
+                // Per-home vacancy roll — uses home_id as entropy so it's deterministic.
+                // This spreads vacancies across all price tiers rather than vacating the
+                // top-value homes wholesale.
                 agent_destiny_seed = agent_destiny_seed.wrapping_mul(6364136223846793005).wrapping_add(home_id as u64);
+                let vacancy_roll = spatial::fate(agent_destiny_seed, 0, 99);
+                if vacancy_roll < profile.vacancy_rate {
+                    // This home is vacant — leave current_count at 0 and move on.
+                    continue;
+                }
+                num_occupied += 1;
+                
+                // Household size
                 let hh_fate = spatial::fate(agent_destiny_seed, 0, 0);
                 let lambda = profile.avg_household_size;
                 let raw_size = lambda + (hh_fate - 0.5) * 2.0;
@@ -496,8 +542,9 @@ impl SimulationEngine {
                 total_generated += hh_size as u32;
             }
             
-            println!("  {} — target: {} | generated: {} | homes: {}",
-                spatial::county_name(county_id), county_pop, total_generated, homes.len());
+            println!("  {} — census: {} | sim target: {} | generated (cumul): {} | occupied: {} / {} homes ({} vacant)",
+                spatial::county_name(county_id), county_pop, county_target, total_generated,
+                num_occupied, homes.len(), homes.len().saturating_sub(num_occupied));
         }
         
         engine.next_agent_id = agent_id_counter;
@@ -583,6 +630,22 @@ impl SimulationEngine {
         }
         println!("Education levels: none={}, elem={}, middle={}, high={}, college={}, grad={}",
             edu_counts[0], edu_counts[1], edu_counts[2], edu_counts[3], edu_counts[4], edu_counts[5]);
+
+        // ====================================================
+        // LOAD PROPERTY ATLAS
+        // ====================================================
+        if let Ok(mut rdr) = csv::Reader::from_path("NJ_Property_Geocoded_Final.csv") {
+            let mut prop_count = 0;
+            for result in rdr.deserialize() {
+                if let Ok(prop) = result {
+                    engine.properties.push(prop);
+                    prop_count += 1;
+                }
+            }
+            println!("Loaded {} properties for Atlas", prop_count);
+        } else {
+            println!("Warning: Could not load NJ_Property_Geocoded_Final.csv");
+        }
 
         engine.rebuild_sector_caches();
         engine.rebuild_county_stats();
@@ -1006,6 +1069,7 @@ impl SimulationEngine {
             viewport_agents,
             viewport_locations,
             county_stats: self.county_stats_cache.clone(),
+            state_entity: self.state_entity.clone(),
         }
     }
 }
@@ -1154,6 +1218,7 @@ fn pick_employer_cross_county(nearby: &[(u32, f32, f64, f32)], pctile: f32, dest
 
 #[tokio::main]
 async fn main() {
+    dotenv::dotenv().ok();
     println!("Initializing Nostradamus Engine...");
     let engine = SimulationEngine::new();
     let engine = Arc::new(Mutex::new(engine));
@@ -1192,7 +1257,7 @@ async fn main() {
             for cmd in pending.drain(..) {
                 match serde_json::from_str::<commands::SimCommand>(&cmd.json_text) {
                     Ok(sim_cmd) => {
-                        let result = commands::execute_command(&mut eng, sim_cmd, &tick_delay_ms);
+                        let result = commands::execute_command(&mut eng, sim_cmd, &tick_delay_ms).await;
                         let response = serde_json::to_string(&result).unwrap_or_default();
                         let _ = cmd.response_tx.send(response);
                     }

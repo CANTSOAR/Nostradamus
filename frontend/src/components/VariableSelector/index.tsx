@@ -6,10 +6,14 @@ export function VariableSelector() {
   const { activeVariable, setActiveVariable } = useMapStore();
 
   return (
-    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-      <span style={{ fontSize: 11, color: "#64748b", marginRight: 4, fontWeight: 600, letterSpacing: "0.08em" }}>
-        LAYER
-      </span>
+    <div style={{
+      display: "flex",
+      gap: 6,
+      alignItems: "center",
+      flexWrap: "wrap", /* Fix overflow issue */
+      justifyContent: "center",
+      maxWidth: 800
+    }}>
       {VARIABLES.map((v) => (
         <button
           key={v.key}

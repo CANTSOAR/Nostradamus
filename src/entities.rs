@@ -133,3 +133,15 @@ pub struct Weather {
     pub condition: WeatherType,
     pub severity: f32,
 }
+/// A property record for the atlas
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Property {
+    pub county: String,
+    pub city: String,
+    pub address: String,
+    pub net_value: f64,
+    pub tax_rate: f64,
+    pub tax_amount: f64,
+    pub lat: f64,
+    pub lon: f64,
+}

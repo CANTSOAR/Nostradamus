@@ -1,0 +1,15 @@
+    Finished `release` profile [optimized] target(s) in 0.47s
+     Running `target/release/Nostradamus`
+Initializing Nostradamus Engine...
+Loaded 21×21 commute matrix
+Loaded 2775028 locations from CSV
+Loaded 21 county demographic profiles
+  MERCER — target: 383732 | generated: 280422 | homes: 115223
+  BURLINGTON — target: 461853 | generated: 694555 | homes: 170201
+  WARREN — target: 109739 | generated: 784781 | homes: 39079
+  GLOUCESTER — target: 302621 | generated: 1028428 | homes: 96008
+  CAMDEN — target: 522581 | generated: 1479713 | homes: 184667
+  ESSEX — target: 853374 | generated: 1866763 | homes: 154777
+  MIDDLESEX — target: 860147 | generated: 2446419 | homes: 218555
+  CAPE MAY — target: 95456 | generated: 2531475 | homes: 91479
+  SALEM — target: 64840 | generated: 2577628 | homes: 20252

@@ -153,6 +153,10 @@ interface MapStore {
   // --- AI Agent ---
   agentMatchedGeoids: string[] | null;
   setAgentMatchedGeoids: (geoids: string[] | null) => void;
+
+  // --- View State ---
+  activeTab: "map" | "data";
+  setActiveTab: (tab: "map" | "data") => void;
 }
 
 export const useMapStore = create<MapStore>((set) => ({
@@ -267,7 +271,7 @@ export const useMapStore = create<MapStore>((set) => ({
   isOrbitActive: false,
   toggleOrbit: () => set((s) => ({ isOrbitActive: !s.isOrbitActive, isFlythroughActive: false })),
 
-  viewPreset: "default",
+  viewPreset: "panoptic",
   setViewPreset: (p) => set({ viewPreset: p }),
 
   viewer: null,
@@ -280,4 +284,7 @@ export const useMapStore = create<MapStore>((set) => ({
 
   agentMatchedGeoids: null,
   setAgentMatchedGeoids: (geoids) => set({ agentMatchedGeoids: geoids }),
+
+  activeTab: "map",
+  setActiveTab: (tab) => set({ activeTab: tab }),
 }));

@@ -42,7 +42,7 @@ impl CommandResult {
 // DISPATCHER (34 commands)
 // ============================================================================
 
-pub fn execute_command(
+pub async fn execute_command(
     engine: &mut SimulationEngine,
     cmd: SimCommand,
     tick_delay: &Arc<AtomicU64>,
@@ -108,8 +108,36 @@ pub fn execute_command(
         // === HISTORY (1) ===
         "get_history"        => cmd_get_history(id, p, engine),
         
+        // === AGENT / AI (1) ===
+        "query_agent"        => cmd_query_agent(id, p, engine).await,
+        
+        "get_properties"     => cmd_get_properties(id, p, engine),
+        
         _ => CommandResult::err(id, &format!("Unknown action: {}", cmd.action)),
     }
+}
+
+fn cmd_get_properties(id: &str, p: &serde_json::Value, engine: &SimulationEngine) -> CommandResult {
+    let lat_min = p.get("lat_min").and_then(|v| v.as_f64()).unwrap_or(38.0);
+    let lat_max = p.get("lat_max").and_then(|v| v.as_f64()).unwrap_or(42.0);
+    let lon_min = p.get("lon_min").and_then(|v| v.as_f64()).unwrap_or(-76.0);
+    let lon_max = p.get("lon_max").and_then(|v| v.as_f64()).unwrap_or(-73.0);
+    let limit = p.get("limit").and_then(|v| v.as_u64()).unwrap_or(1000) as usize;
+
+    println!("Property request: bbox=[{}, {}, {}, {}], limit={}", lat_min, lon_min, lat_max, lon_max, limit);
+
+    let results: Vec<&crate::entities::Property> = engine.properties.iter()
+        .filter(|prop| {
+            prop.lat >= lat_min && prop.lat <= lat_max && 
+            prop.lon >= lon_min && prop.lon <= lon_max
+        })
+        .take(limit)
+        .collect();
+
+    CommandResult::ok(id, serde_json::json!({
+        "count": results.len(),
+        "properties": results
+    }))
 }
 
 // ============================================================================
@@ -775,6 +803,58 @@ fn cmd_mass_layoff(id: &str, p: &Value, engine: &mut SimulationEngine) -> Comman
         }
     }
     CommandResult::ok(id, json!({"fired": fired, "pct_requested": pct}))
+}
+
+// ============================================================================
+// AGENT / AI COMMANDS
+// ============================================================================
+
+async fn cmd_query_agent(id: &str, p: &Value, engine: &SimulationEngine) -> CommandResult {
+    let query = match p.get("query").and_then(|v| v.as_str()) {
+        Some(q) => q,
+        None => return CommandResult::err(id, "Missing 'query'"),
+    };
+
+    let mut context = String::from("You are Nostradamus, an AI advisor for a digital twin simulation of New Jersey.
+The simulation tracks population, wealth, health, and economic activity across 21 counties.
+Counties: Atlantic, Bergen, Burlington, Camden, Cape May, Cumberland, Essex, Gloucester, Hudson, Hunterdon, Mercer, Middlesex, Monmouth, Morris, Ocean, Passaic, Salem, Somerset, Sussex, Union, Warren.
+
+Current Global State:
+");
+    context.push_str(&format!("- Population: {}\n", engine.state_entity.population));
+    context.push_str(&format!("- Avg Wealth: {:.2}\n", engine.state_entity.avg_wealth));
+    context.push_str(&format!("- Total Economy Value: ${:.0}\n", engine.state_entity.total_economy_value));
+    context.push_str(&format!("- State Tax Rate: {:.1}%\n", engine.state_entity.state_tax_rate * 100.0));
+    
+    context.push_str("\nCounty Data (approx):\n");
+    for s in &engine.county_stats_cache {
+        context.push_str(&format!("- {}: Pop {}, Avg Wealth {:.0}, Employers {}\n", 
+            s.name, s.population, s.avg_wealth, s.num_employers));
+    }
+
+    context.push_str("\nRespond in a helpful, analytical tone. If you identify specific counties in your answer, 
+please also provide a field 'matched_geoids' containing a JSON array of the 0-indexed county IDs you mentioned.
+At the end of your message, if you want to highlight counties, add a line like: MATCHED_GEOIDS: [0, 5, 12]");
+
+    match engine.groq_client.query(query, &context).await {
+        Ok(answer) => {
+            let mut matched_geoids = Vec::new();
+            if let Some(line) = answer.lines().find(|l| l.contains("MATCHED_GEOIDS:")) {
+                if let Some(json_start) = line.find('[') {
+                    if let Ok(ids) = serde_json::from_str::<Vec<u8>>(&line[json_start..]) {
+                        matched_geoids = ids;
+                    }
+                }
+            }
+
+            CommandResult::ok(id, json!({
+                "answer_text": answer,
+                "matched_geoids": matched_geoids,
+                "code_executed": null,
+            }))
+        },
+        Err(e) => CommandResult::err(id, &e),
+    }
 }
 
 fn cmd_pandemic(id: &str, p: &Value, engine: &mut SimulationEngine) -> CommandResult {

@@ -1,4 +1,19 @@
-.PHONY: ssh-linuxone deploy-linuxone
+.PHONY: ssh-linuxone deploy-linuxone backend frontend dev kill
+
+backend:
+	cargo run --release
+
+frontend:
+	cd frontend && npm run dev
+
+dev:
+	make -j 2 backend frontend
+
+kill:
+	@echo "Killing backend and frontend processes..."
+	-pkill -f Nostradamus || true
+	-pkill -f vite || true
+	@echo "All processes terminated."
 
 ssh-linuxone:
 	chmod 400 akash.pem
