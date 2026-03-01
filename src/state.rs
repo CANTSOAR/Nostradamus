@@ -7,6 +7,8 @@ pub struct Global {
     pub tick: u64,
     /// Offset in seconds from Jan 1, 2010 (1 tick = 1 hour)
     pub time_offset_seconds: u64,
+    /// Current internal day of the week (0 = Mon, 6 = Sun)
+    pub day_of_week: u8,
     
     // Macro-Economic Parameters
     /// Baseline global tax rate applied to income
@@ -35,6 +37,7 @@ impl Default for Global {
         Self {
             tick: 0,
             time_offset_seconds: 0,
+            day_of_week: 0,
             base_tax_rate: 0.05,
             inflation_rate: 1.02,
             base_interest_rate: 0.04,
@@ -107,10 +110,10 @@ impl Global {
     }
 
     /// Calculate how many total new agents will move into the simulation this tick
-    pub fn calculate_immigration(&self, average_town_health: f64, total_population: u64) -> u64 {
+    pub fn calculate_immigration(&self, average_town_health: f64, total_population: u32) -> u32 {
         // Good town health attracts more immigrants
         let attraction = average_town_health * 1.5; 
-        ((total_population as f64) * self.immigration_rate * attraction) as u64
+        ((total_population as f64) * self.immigration_rate * attraction) as u32
     }
 
     /// Determine if a specific agent leaves the simulation forever due to zero wealth or low health
