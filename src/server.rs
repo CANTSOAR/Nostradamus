@@ -41,16 +41,29 @@ impl Default for ViewportFilter {
     fn default() -> Self {
         Self {
             county: AtomicU8::new(spatial::COUNTY_UNKNOWN),
-            // Default: all of NJ
             bbox: Mutex::new((38.9, 41.4, -75.6, -73.8)),
         }
     }
+}
+
+/// Pending command waiting for engine to execute
+pub struct PendingCommand {
+    pub json_text: String,
+    pub response_tx: tokio::sync::oneshot::Sender<String>,
+}
+
+/// Channel for routing commands from WebSocket → engine
+pub type CommandQueue = Arc<Mutex<Vec<PendingCommand>>>;
+
+pub fn new_command_queue() -> CommandQueue {
+    Arc::new(Mutex::new(Vec::new()))
 }
 
 pub async fn start_websocket_server(
     state: Arc<Mutex<Option<SimulationPayload>>>,
     paused_flag: Arc<std::sync::atomic::AtomicBool>,
     viewport_filter: Arc<ViewportFilter>,
+    command_queue: CommandQueue,
 ) {
     let addr = "127.0.0.1:8080";
     let listener = TcpListener::bind(&addr).await.expect("Failed to bind WebSocket");
@@ -60,20 +73,48 @@ pub async fn start_websocket_server(
         let state_clone = state.clone();
         let paused_clone = paused_flag.clone();
         let vf_clone = viewport_filter.clone();
+        let cmd_queue = command_queue.clone();
         
         tokio::spawn(async move {
             if let Ok(ws_stream) = accept_async(stream).await {
                 println!("New UI Client Connected!");
                 
-                let (mut tx, mut rx) = ws_stream.split();
+                let (tx, mut rx) = ws_stream.split();
+                let tx = Arc::new(Mutex::new(tx));
                 
+                // Reader task: handles UI commands and API calls
+                let tx_reader = tx.clone();
                 let paused_rx = paused_clone.clone();
                 let vf_rx = vf_clone.clone();
+                let cmd_q_reader = cmd_queue.clone();
                 tokio::spawn(async move {
                     while let Some(msg) = rx.next().await {
                         if let Ok(m) = msg {
                             if let Ok(text) = m.into_text() {
-                                let text = text.trim();
+                                let text = text.trim().to_string();
+                                
+                                // Try JSON command first
+                                if text.starts_with('{') {
+                                    // Queue for engine execution
+                                    let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+                                    {
+                                        let mut q = cmd_q_reader.lock().await;
+                                        q.push(PendingCommand {
+                                            json_text: text,
+                                            response_tx: resp_tx,
+                                        });
+                                    }
+                                    // Wait for response and send back
+                                    if let Ok(response) = resp_rx.await {
+                                        let mut sink = tx_reader.lock().await;
+                                        let _ = sink.send(
+                                            tokio_tungstenite::tungstenite::Message::Text(response.into())
+                                        ).await;
+                                    }
+                                    continue;
+                                }
+                                
+                                // Legacy text commands
                                 if text == "pause" {
                                     paused_rx.store(true, Ordering::SeqCst);
                                     println!("Engine Paused by UI");
@@ -98,6 +139,8 @@ pub async fn start_websocket_server(
                     }
                 });
                 
+                // Sender task: broadcasts payload at 20Hz
+                let tx_sender = tx.clone();
                 let mut interval = tokio::time::interval(std::time::Duration::from_millis(50));
                 
                 loop {
@@ -113,7 +156,8 @@ pub async fn start_websocket_server(
                     };
                     
                     if !payload_str.is_empty() {
-                        if tx.send(tokio_tungstenite::tungstenite::Message::Text(payload_str.into())).await.is_err() {
+                        let mut sink = tx_sender.lock().await;
+                        if sink.send(tokio_tungstenite::tungstenite::Message::Text(payload_str.into())).await.is_err() {
                             println!("Client Disconnected");
                             break; 
                         }

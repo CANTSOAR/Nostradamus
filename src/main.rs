@@ -4,6 +4,7 @@ pub mod entities;
 pub mod server;
 pub mod updates;
 pub mod metrics;
+pub mod commands;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -1163,9 +1164,11 @@ async fn main() {
     let server_paused_ref = is_paused.clone();
     let viewport_filter = Arc::new(ViewportFilter::default());
     let server_vf_ref = viewport_filter.clone();
+    let command_queue = server::new_command_queue();
+    let server_cmd_ref = command_queue.clone();
     
     tokio::spawn(async move {
-        server::start_websocket_server(server_payload_ref, server_paused_ref, server_vf_ref).await;
+        server::start_websocket_server(server_payload_ref, server_paused_ref, server_vf_ref, server_cmd_ref).await;
     });
     
     let mut ticker = tokio::time::interval(Duration::from_millis(2));
@@ -1179,6 +1182,25 @@ async fn main() {
         if is_paused.load(Ordering::SeqCst) { continue; }
         
         let mut eng = engine.lock().await;
+        
+        // Process pending commands from WebSocket
+        {
+            let mut pending = command_queue.lock().await;
+            for cmd in pending.drain(..) {
+                match serde_json::from_str::<commands::SimCommand>(&cmd.json_text) {
+                    Ok(sim_cmd) => {
+                        let result = commands::execute_command(&mut eng, sim_cmd);
+                        let response = serde_json::to_string(&result).unwrap_or_default();
+                        let _ = cmd.response_tx.send(response);
+                    }
+                    Err(e) => {
+                        let err_resp = serde_json::json!({"id": "unknown", "ok": false, "error": e.to_string()});
+                        let _ = cmd.response_tx.send(err_resp.to_string());
+                    }
+                }
+            }
+        }
+        
         eng.tick();
         
         payload_tick_counter += 1;
