@@ -77,7 +77,13 @@ export default function MapPanel({ payload, pinnedObjects, onSelectCounty, onSel
                 onEachFeature: (feature, layer) => {
                     const name = feature.properties?.COUNTY || feature.properties?.NAME || '';
                     layer.bindTooltip(name, { sticky: true, className: 'county-tooltip' });
-                    layer.on('click', () => onSelectCounty(name.toUpperCase()));
+                    layer.on('click', (e) => {
+                        onSelectCounty(name.toUpperCase());
+                        if ((layer as any).getBounds) {
+                            map.flyToBounds((layer as any).getBounds(), { padding: [50, 50], duration: 0.5 });
+                        }
+                        L.DomEvent.stopPropagation(e as any);
+                    });
                 },
             }).addTo(map);
         }
@@ -95,6 +101,12 @@ export default function MapPanel({ payload, pinnedObjects, onSelectCounty, onSel
                 onEachFeature: (feature, layer) => {
                     const name = feature.properties?.NAME || '';
                     layer.bindTooltip(name, { className: 'county-tooltip' });
+                    layer.on('click', (e) => {
+                        if ((layer as any).getBounds) {
+                            map.flyToBounds((layer as any).getBounds(), { padding: [20, 20], duration: 0.5 });
+                        }
+                        L.DomEvent.stopPropagation(e as any);
+                    });
                 },
             }).addTo(muniLayerRef.current);
         }
@@ -103,10 +115,16 @@ export default function MapPanel({ payload, pinnedObjects, onSelectCounty, onSel
         const updateViewport = () => {
             const bounds = map.getBounds();
             const zoom = map.getZoom();
-            setViewport(
-                bounds.getSouth(), bounds.getNorth(),
-                bounds.getWest(), bounds.getEast()
-            );
+
+            // Only notify backend to render agents/locations if we are zoomed in enough
+            if (zoom >= 11) {
+                setViewport(
+                    bounds.getSouth(), bounds.getNorth(),
+                    bounds.getWest(), bounds.getEast()
+                );
+            } else {
+                setViewport(0, 0, 0, 0); // Stops rendering thousands of objects when zoomed out
+            }
 
             // Toggle municipality layer based on zoom
             if (muniLayerRef.current) {

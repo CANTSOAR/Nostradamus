@@ -985,7 +985,7 @@ impl SimulationEngine {
                 && a.current_coord.lat >= lat_min && a.current_coord.lat <= lat_max
                 && a.current_coord.lon >= lon_min && a.current_coord.lon <= lon_max
             })
-            .take(5000)
+            .take(800)
             .cloned()
             .collect();
         
@@ -996,7 +996,7 @@ impl SimulationEngine {
                 && l.coord.lat >= lat_min && l.coord.lat <= lat_max
                 && l.coord.lon >= lon_min && l.coord.lon <= lon_max
             })
-            .take(2000)
+            .take(200)
             .cloned()
             .collect();
         
