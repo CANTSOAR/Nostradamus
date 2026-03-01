@@ -1167,29 +1167,32 @@ async fn main() {
     let command_queue = server::new_command_queue();
     let server_cmd_ref = command_queue.clone();
     
+    // Tick delay in ms — controlled by set_speed command
+    // Default 2ms (max speed). Shared with command system.
+    let tick_delay_ms = Arc::new(std::sync::atomic::AtomicU64::new(2));
+    
     tokio::spawn(async move {
         server::start_websocket_server(server_payload_ref, server_paused_ref, server_vf_ref, server_cmd_ref).await;
     });
     
-    let mut ticker = tokio::time::interval(Duration::from_millis(2));
     println!("Simulation Started!");
     
     let mut payload_tick_counter = 0u64;
     
     loop {
-        ticker.tick().await;
-        
-        if is_paused.load(Ordering::SeqCst) { continue; }
+        // Dynamic tick interval from speed control
+        let delay = tick_delay_ms.load(Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_millis(delay)).await;
         
         let mut eng = engine.lock().await;
         
-        // Process pending commands from WebSocket
+        // Process pending commands ALWAYS (even while paused)
         {
             let mut pending = command_queue.lock().await;
             for cmd in pending.drain(..) {
                 match serde_json::from_str::<commands::SimCommand>(&cmd.json_text) {
                     Ok(sim_cmd) => {
-                        let result = commands::execute_command(&mut eng, sim_cmd);
+                        let result = commands::execute_command(&mut eng, sim_cmd, &tick_delay_ms);
                         let response = serde_json::to_string(&result).unwrap_or_default();
                         let _ = cmd.response_tx.send(response);
                     }
@@ -1200,6 +1203,9 @@ async fn main() {
                 }
             }
         }
+        
+        // Skip tick when paused (but commands still processed above)
+        if is_paused.load(Ordering::SeqCst) { continue; }
         
         eng.tick();
         
@@ -1215,3 +1221,4 @@ async fn main() {
         }
     }
 }
+
