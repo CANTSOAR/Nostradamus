@@ -46,6 +46,38 @@ export function useProperties({
     const getCellKey = (lat: number, lon: number) =>
         `${Math.floor(lat / CELL_SIZE)}_${Math.floor(lon / CELL_SIZE)}`;
 
+    const loadStaticBerkeleyHeights = async () => {
+        if (propertiesRef.current.length > 0) return; // already loaded
+        try {
+            const res = await fetch('/data/berkeley_heights.csv');
+            if (!res.ok) return;
+            const text = await res.text();
+            const lines = text.trim().split('\n');
+            // skip header
+            const props: SystemProperty[] = [];
+            for (let i = 1; i < lines.length; i++) {
+                const [address, net_value, tax_rate, tax_amount, lat, lon] = lines[i].split(',');
+                if (!lat || !lon) continue;
+                props.push({
+                    address,
+                    city: 'Berkeley Heights',
+                    county: 'Union',
+                    net_value: parseFloat(net_value),
+                    tax_rate: parseFloat(tax_rate),
+                    tax_amount: parseFloat(tax_amount),
+                    lat: parseFloat(lat),
+                    lon: parseFloat(lon),
+                });
+            }
+            if (props.length > 0) {
+                propertiesRef.current = props;
+                console.log(`[useProperties] Loaded ${props.length} Berkeley Heights properties from static CSV`);
+            }
+        } catch (e) {
+            console.warn('[useProperties] Static CSV load failed:', e);
+        }
+    };
+
     const updateVisibleProperties = async () => {
         if (!viewer || !show) return;
 
@@ -73,6 +105,8 @@ export function useProperties({
         // Fetch new data if moved significantly or first time
         if (bboxKey !== lastBBox.current) {
             lastBBox.current = bboxKey;
+            // Try backend first, fall back to static CSV
+            let fetched = false;
             try {
                 const response = await wsClient.sendCommand("get_properties", {
                     lat_min: south,
@@ -84,18 +118,25 @@ export function useProperties({
 
                 if (response && response.ok && response.result) {
                     const props = response.result.properties as SystemProperty[];
-                    propertiesRef.current = props;
-                    gridRef.current.clear();
-                    props.forEach((p, idx) => {
-                        const key = getCellKey(p.lat, p.lon);
-                        if (!gridRef.current.has(key)) gridRef.current.set(key, []);
-                        gridRef.current.get(key)!.push(idx);
-                    });
+                    if (props.length > 0) {
+                        propertiesRef.current = props;
+                        fetched = true;
+                    }
                 }
-            } catch (err) {
-                console.error("Property viewport fetch error:", err);
+            } catch (_err) {
+                // backend offline — fall through to static CSV
+            }
+
+            // Fall back: load static Berkeley Heights CSV if viewport overlaps BH bbox
+            if (!fetched) {
+                const BH_BBOX = { n: 40.70, s: 40.66, e: -74.42, w: -74.47 };
+                const overlaps = south < BH_BBOX.n && north > BH_BBOX.s && west < BH_BBOX.e && east > BH_BBOX.w;
+                if (overlaps) {
+                    await loadStaticBerkeleyHeights();
+                }
             }
         }
+
 
         if (propertiesRef.current.length === 0) return;
 
@@ -162,8 +203,12 @@ export function useProperties({
         pointsRef.current = points;
         labelsRef.current = labels;
 
-        // Initial update
-        updateVisibleProperties();
+        // Pre-load Berkeley Heights static CSV immediately (works even when backend is offline)
+        loadStaticBerkeleyHeights().then(() => {
+            // Initial update after data is ready
+            updateVisibleProperties();
+        });
+
 
         // Listen for camera movement
         const removeListener = viewer.camera.moveEnd.addEventListener(updateVisibleProperties);

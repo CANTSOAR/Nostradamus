@@ -234,12 +234,10 @@ function CountyCard({ county }: { county: CountyStats }) {
 // ─── Berkeley Heights panel ─────────────────────────────────────────────────
 
 function BerkeleyHeightsPanel() {
-    const { viewer, showProperties, toggleProperties, setActiveTab } = useMapStore(s => ({
-        viewer: s.viewer,
-        showProperties: s.showProperties,
-        toggleProperties: s.toggleProperties,
-        setActiveTab: s.setActiveTab,
-    }));
+    const viewer = useMapStore(s => s.viewer);
+    const showProperties = useMapStore(s => s.showProperties);
+    const toggleProperties = useMapStore(s => s.toggleProperties);
+    const setActiveTab = useMapStore(s => s.setActiveTab);
 
     const fmtCurrency = (n: number) =>
         new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);

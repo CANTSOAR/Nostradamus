@@ -39,6 +39,7 @@ import { useSatellites } from "../../hooks/useSatellites";
 import { useFlights } from "../../hooks/useFlights";
 import { useBusinesses } from "../../hooks/useBusinesses";
 import { useProperties } from "../../hooks/useProperties";
+import { useBerkeleyHeightsProperties } from "../../hooks/useBerkeleyHeightsProperties";
 import type { FlightState } from "../../hooks/useFlights";
 import CesiumNavigation from "cesium-navigation-es6";
 
@@ -319,6 +320,11 @@ export function CesiumMap() {
   const { entityMapRef: _businessMapRef } = useBusinesses({
     viewer: viewerRef.current,
     show: showBusinesses,
+  });
+
+  // Berkeley Heights property atlas (static CSV, always available)
+  const { handleClick: handlePropertyClick } = useBerkeleyHeightsProperties({
+    viewer: viewerRef.current,
   });
 
   // Earthquakes removed
@@ -1248,6 +1254,12 @@ export function CesiumMap() {
             });
           }
         }
+        return;
+      }
+
+      // Berkeley Heights property point click
+      if (picked?.primitive && picked.id?.type === "bh_property") {
+        handlePropertyClick(picked.id.index);
         return;
       }
 

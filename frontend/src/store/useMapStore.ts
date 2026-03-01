@@ -217,7 +217,7 @@ export const useMapStore = create<MapStore>((set) => ({
   showBusinessList: false,
   toggleBusinessList: () => set((s) => ({ showBusinessList: !s.showBusinessList })),
 
-  showProperties: false,
+  showProperties: true,
   toggleProperties: () => set((s) => ({ showProperties: !s.showProperties })),
   selectedProperty: null,
   setSelectedProperty: (p) => set({ selectedProperty: p }),
