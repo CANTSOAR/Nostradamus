@@ -7,6 +7,8 @@ pub struct Global {
     pub tick: u64,
     /// Offset in seconds from Jan 1, 2010 (1 tick = 1 hour)
     pub time_offset_seconds: u64,
+    /// Current internal day of the week (0 = Mon, 6 = Sun)
+    pub day_of_week: u8,
     
     // Macro-Economic Parameters
     /// Baseline global tax rate applied to income
@@ -35,6 +37,7 @@ impl Default for Global {
         Self {
             tick: 0,
             time_offset_seconds: 0,
+            day_of_week: 0,
             base_tax_rate: 0.05,
             inflation_rate: 1.02,
             base_interest_rate: 0.04,

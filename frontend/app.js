@@ -8,6 +8,8 @@ function resize() {
     const rect = parent.getBoundingClientRect();
     canvas.width = rect.width * dpr;
     canvas.height = rect.height * dpr;
+    canvas.style.width = rect.width + 'px';
+    canvas.style.height = rect.height + 'px';
 }
 
 window.addEventListener('resize', resize);
@@ -76,8 +78,9 @@ canvas.addEventListener('wheel', (e) => {
     let zoomFactor = Math.exp(wheel * zoomIntensity * Math.abs(e.deltaY));
     if (Math.abs(e.deltaY) < 1) zoomFactor = Math.exp(wheel * 0.1);
 
-    const nx = e.offsetX;
-    const ny = e.offsetY;
+    const rect = canvas.getBoundingClientRect();
+    const nx = e.clientX - rect.left;
+    const ny = e.clientY - rect.top;
 
     offsetX = nx - (nx - offsetX) * zoomFactor;
     offsetY = ny - (ny - offsetY) * zoomFactor;
@@ -86,8 +89,9 @@ canvas.addEventListener('wheel', (e) => {
 
 canvas.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
-    const mx = e.offsetX;
-    const my = e.offsetY;
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
 
     isDragging = true;
     isDragMoved = false;
@@ -96,10 +100,11 @@ canvas.addEventListener('mousedown', (e) => {
 });
 
 canvas.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
     cssMouseX = e.clientX;
     cssMouseY = e.clientY;
-    mouseX = e.offsetX;
-    mouseY = e.offsetY;
+    mouseX = e.clientX - rect.left;
+    mouseY = e.clientY - rect.top;
 
     if (isDragging) {
         const newOffsetX = mouseX - startDragX;
@@ -224,9 +229,20 @@ function updateDashboard() {
 
 function updatePinsUI() {
     if (!pinsContainer) return;
-    pinsContainer.innerHTML = '';
+
+    // Track existing DOM cards to prevent rapid recreating (which breaks onclick events)
+    const existingIds = Array.from(pinsContainer.children).map(c => c.getAttribute('data-pin-id'));
+    const currentIds = pinnedEntities.map(p => `${p.type}-${p.id}`);
+
+    // Remove lingering dead pins
+    Array.from(pinsContainer.children).forEach(child => {
+        if (!currentIds.includes(child.getAttribute('data-pin-id'))) {
+            child.remove();
+        }
+    });
 
     pinnedEntities.forEach(pin => {
+        const pinIdStr = `${pin.type}-${pin.id}`;
         let text = '';
         if (pin.type === 'loc') {
             const loc = (renderData?.locations_subset || []).find(l => l.id === pin.id);
@@ -236,9 +252,9 @@ function updatePinsUI() {
                     const org = renderData.organizations[loc.organization_id];
                     if (org) orgInfo = `${org.name} (Funds: $${org.total_funds.toFixed(2)})`;
                 }
-                text = `<strong>📍 Location: ${loc.name}</strong>ID: ${loc.id}\nType: ${loc.location_type}\nCapacity: ${loc.capacity}\nWealth: $${(loc.wealth || 0).toFixed(2)}\nOrganization: ${orgInfo}`;
+                text = `<strong>📍 Location: ${loc.name}</strong>ID: ${loc.id}\nType: ${loc.location_type}\nCapacity: ${loc.capacity}\nCounty: ${loc.county || 'None'}\nWealth: $${(loc.wealth || 0).toFixed(2)}\nOrganization: ${orgInfo}`;
             } else {
-                text = `<strong>📍 Location ID: ${pin.id}</strong>\nLoading...`;
+                text = `<strong>📍 Location ID: ${pin.id}</strong>\nOff-screen...`;
             }
         } else if (pin.type === 'agent') {
             const agent = (renderData?.active_agents_subset || []).find(a => a.id === pin.id);
@@ -248,19 +264,25 @@ function updatePinsUI() {
                     const transport = renderData.transports.find(t => t.id === agent.transport_id);
                     if (transport) transportName = `${transport.transport_type} (${transport.speed_mph.toFixed(1)} mph)`;
                 }
-                text = `<strong>🚶 Agent ID: ${agent.id}</strong>Age: ${agent.age} | Health: ${(agent.health * 100).toFixed(1)}%\nWealth: $${agent.wealth.toFixed(2)}\nIncome: $${agent.income.toFixed(2)}/yr\nHome ID: ${agent.home_location_id}\nEmployer ID: ${agent.employer_location_id || "Unemployed"}\nTransport: ${transportName}`;
+                text = `<strong>🚶 Agent ID: ${agent.id}</strong>Age: ${agent.age} | Health: ${(agent.health * 100).toFixed(1)}%\nWealth: $${agent.wealth.toFixed(2)}\nIncome: $${agent.income.toFixed(2)}/yr\nCounty: ${agent.home_county || 'None'} / Work: ${agent.work_county || 'None'}\nHome ID: ${agent.home_location_id}\nEmployer ID: ${agent.employer_location_id || "Unemployed"}\nTransport: ${transportName}`;
             } else {
                 text = `<strong>🚶 Agent ID: ${pin.id}</strong>\nOff-screen...`;
             }
         }
 
-        const card = document.createElement('div');
-        card.className = 'pin-card';
-        card.innerHTML = `
-            <div class="pin-close" onclick="removePin('${pin.type}', ${pin.id})">&times;</div>
-            <div style="white-space: pre-wrap; line-height: 1.4; padding-right: 15px;">${text}</div>
-        `;
-        pinsContainer.appendChild(card);
+        let existingCard = pinsContainer.querySelector(`[data-pin-id="${pinIdStr}"]`);
+        if (!existingCard) {
+            existingCard = document.createElement('div');
+            existingCard.className = 'pin-card';
+            existingCard.setAttribute('data-pin-id', pinIdStr);
+            existingCard.innerHTML = `
+                <div class="pin-close" onmousedown="removePin('${pin.type}', ${pin.id})">&times;</div>
+                <div class="pin-content" style="white-space: pre-wrap; line-height: 1.4; padding-right: 15px;"></div>
+            `;
+            pinsContainer.appendChild(existingCard);
+        }
+
+        existingCard.querySelector('.pin-content').innerHTML = text;
     });
 }
 
@@ -352,7 +374,7 @@ function render() {
                         const org = renderData.organizations[loc.organization_id];
                         if (org) orgInfo = `${org.name} (Funds: $${org.total_funds.toFixed(2)})`;
                     }
-                    hoveredEntityText = `<strong>📍 Location: ${loc.name}</strong>ID: ${loc.id}\nType: ${loc.location_type}\nCapacity: ${loc.capacity}\nWealth: $${(loc.wealth || 0).toFixed(2)}\nOrganization: ${orgInfo}`;
+                    hoveredEntityText = `<strong>📍 Location: ${loc.name}</strong>ID: ${loc.id}\nType: ${loc.location_type}\nCapacity: ${loc.capacity}\nCounty: ${loc.county || 'None'}\nWealth: $${(loc.wealth || 0).toFixed(2)}\nOrganization: ${orgInfo}`;
                     hoveredEntityData = { type: 'loc', id: loc.id };
                     hoveredEntityPriority = 1;
 
@@ -392,7 +414,7 @@ function render() {
                         const transport = renderData.transports.find(t => t.id === agent.transport_id);
                         if (transport) transportName = `${transport.transport_type} (${transport.speed_mph.toFixed(1)} mph)`;
                     }
-                    hoveredEntityText = `<strong>🚶 Agent ID: ${agent.id}</strong>Age: ${agent.age} | Health: ${(agent.health * 100).toFixed(1)}%\nWealth: $${agent.wealth.toFixed(2)}\nIncome: $${agent.income.toFixed(2)}/yr\nHome ID: ${agent.home_location_id}\nEmployer ID: ${agent.employer_location_id || "Unemployed"}\nTransport: ${transportName}`;
+                    hoveredEntityText = `<strong>🚶 Agent ID: ${agent.id}</strong>Age: ${agent.age} | Health: ${(agent.health * 100).toFixed(1)}%\nWealth: $${agent.wealth.toFixed(2)}\nIncome: $${agent.income.toFixed(2)}/yr\nCounty: ${agent.home_county || 'None'} / Work: ${agent.work_county || 'None'}\nHome ID: ${agent.home_location_id}\nEmployer ID: ${agent.employer_location_id || "Unemployed"}\nTransport: ${transportName}`;
                     hoveredEntityData = { type: 'agent', id: agent.id };
                     hoveredEntityPriority = 2;
 
