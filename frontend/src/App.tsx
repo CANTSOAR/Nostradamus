@@ -290,7 +290,7 @@ function SimulationPanel() {
           </span>
         </div>
 
-        <StatRow label="Agents (Sample)" value={simulationData?.active_agents_subset?.length?.toString() ?? "0"} />
+        <StatRow label="Agents (Viewport)" value={simulationData?.viewport_agents?.length?.toString() ?? "0"} />
         <StatRow label="Tick" value={simulationData?.tick?.toString() ?? "0"} />
 
         {simulationData?.global_metrics && (

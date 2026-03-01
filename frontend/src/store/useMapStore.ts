@@ -4,6 +4,7 @@ import type { ViewLevel } from "../types/navigation";
 import type { TractProperties } from "../types/tract";
 import type { BuildingProperties } from "../types/building";
 import type { MunicipalityProperties } from "../types/municipality";
+import type { SimulationPayload } from "../types/payload";
 
 export type VisualMode = "default" | "crt" | "nightvision" | "flir" | "noir" | "anime" | "highcontrast";
 export type SkyMode = "sunny" | "cloudy" | "dusk" | "night";
@@ -144,8 +145,8 @@ interface MapStore {
   setViewer: (v: any) => void;
 
   // --- Simulation (Nostradamus Engine) ---
-  simulationData: import('../types/payload').SimulationPayload | null;
-  setSimulationData: (data: import('../types/payload').SimulationPayload | null) => void;
+  simulationData: SimulationPayload | null;
+  setSimulationData: (data: SimulationPayload | null) => void;
   simulationStatus: "connected" | "disconnected" | "connecting";
   setSimulationStatus: (status: "connected" | "disconnected" | "connecting") => void;
 

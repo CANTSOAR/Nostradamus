@@ -31,8 +31,8 @@ export function SimulationLayer() {
         primitives.removeAll();
 
         // Render agents
-        if (simulationData.active_agents_subset) {
-            simulationData.active_agents_subset.forEach((agent: any) => {
+        if (simulationData.viewport_agents) {
+            simulationData.viewport_agents.forEach((agent: any) => {
                 if (!agent.current_coord) return;
                 primitives.add({
                     position: Cesium.Cartesian3.fromDegrees(
@@ -48,19 +48,21 @@ export function SimulationLayer() {
             });
         }
 
-        // Render buildings
-        if (simulationData.buildings_subset) {
-            simulationData.buildings_subset.forEach((bld: any) => {
-                if (!bld.coord) return;
+        // Render locations
+        if (simulationData.viewport_locations) {
+            simulationData.viewport_locations.forEach((loc: any) => {
+                if (!loc.coord) return;
                 let color = Cesium.Color.WHITE;
-                if (bld.building_type === "Residential") color = Cesium.Color.SLATEGRAY;
-                else if (bld.building_type === "Commercial") color = Cesium.Color.ORANGE;
-                else if (bld.building_type === "Public") color = Cesium.Color.AQUAMARINE;
+                if (loc.location_type === "Residential") color = Cesium.Color.SLATEGRAY;
+                else if (loc.location_type === "Employer") color = Cesium.Color.ORANGE;
+                else if (loc.location_type === "Store") color = Cesium.Color.YELLOW;
+                else if (loc.location_type === "School") color = Cesium.Color.AQUAMARINE;
+                else if (loc.location_type === "Public") color = Cesium.Color.LIGHTGREEN;
 
                 primitives.add({
                     position: Cesium.Cartesian3.fromDegrees(
-                        bld.coord.lon,
-                        bld.coord.lat,
+                        loc.coord.lon,
+                        loc.coord.lat,
                         0.0
                     ),
                     color: color,

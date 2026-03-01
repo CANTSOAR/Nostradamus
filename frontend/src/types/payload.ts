@@ -1,6 +1,5 @@
 import { Agent } from './agent';
-import { BuildingProperties } from './building';
-import { Vehicle } from './vehicle';
+import { Location } from './location';
 
 export interface GlobalMetrics {
     tick: number;
@@ -14,10 +13,19 @@ export interface GlobalMetrics {
     grid_resolution: number;
 }
 
+export interface CountyStats {
+    county_id: number;
+    name: string;
+    population: number;
+    avg_wealth: number;
+    total_location_value: number;
+    num_employers: number;
+}
+
 export interface SimulationPayload {
     tick: number;
-    global_metrics: GlobalMetrics;
-    active_agents_subset: Agent[];
-    buildings_subset: BuildingProperties[];
-    vehicles_subset: Vehicle[];
+    global_metrics: any; // Using any for now to match backend's Global struct flexibility
+    viewport_agents: Agent[];
+    viewport_locations: Location[];
+    county_stats: CountyStats[];
 }

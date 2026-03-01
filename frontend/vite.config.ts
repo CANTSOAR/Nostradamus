@@ -28,6 +28,9 @@ export default defineConfig({
   build: {
     chunkSizeWarningLimit: 5000,
   },
+  preview: {
+    allowedHosts: ["nostradamus.thecloud.my"],
+  },
   test: {
     environment: "jsdom",
     globals: true,
