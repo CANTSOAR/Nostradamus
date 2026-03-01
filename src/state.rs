@@ -110,10 +110,10 @@ impl Global {
     }
 
     /// Calculate how many total new agents will move into the simulation this tick
-    pub fn calculate_immigration(&self, average_town_health: f64, total_population: u64) -> u64 {
+    pub fn calculate_immigration(&self, average_town_health: f64, total_population: u32) -> u32 {
         // Good town health attracts more immigrants
         let attraction = average_town_health * 1.5; 
-        ((total_population as f64) * self.immigration_rate * attraction) as u64
+        ((total_population as f64) * self.immigration_rate * attraction) as u32
     }
 
     /// Determine if a specific agent leaves the simulation forever due to zero wealth or low health

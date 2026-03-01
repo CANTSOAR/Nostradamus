@@ -11,10 +11,13 @@ dist/
 # macOS
 .DS_Store
 
-# Data
+# Data — raw sources and large generated files
 *.pbf
 *.osm
+data/raw/
+data/clean/locations.csv
 data/output/
+data/scripts/*.json
 
 # IDEs
 .vscode/

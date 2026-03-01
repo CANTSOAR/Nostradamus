@@ -5,36 +5,43 @@ use std::collections::HashMap;
 /// An individual actor inside the ABM simulation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Agent {
-    pub id: u64,
+    pub id: u32,
     pub age: u8,
-    pub wealth: f64,
-    pub income: f64,
+    /// County encoded as u8 index
+    pub county: u8,
+    /// Deterministic hash seed — sole source of randomness for this agent
+    pub destiny: u64,
+
+    // Economics (f32 — saves 20 bytes per agent vs f64)
+    pub wealth: f32,
+    pub income: f32,
+    pub propensity_to_consume: f32,
+
+    // Physical
     /// 0.0 to 1.0 (dead to healthy)
-    pub health: f64,
-    pub propensity_to_consume: f64,
-    /// Inline speed in degrees-per-tick (eliminates transport HashMap lookup)
-    pub speed: f64,
+    pub health: f32,
+    /// Inline speed in degrees-per-tick
+    pub speed: f32,
 
     // Dynamic State
     pub current_coord: Coordinate,
-    /// The location the agent is currently navigating towards (sticky until arrival)
-    pub target_location_id: Option<u64>,
+    /// The location the agent is currently navigating towards
+    pub target_location_id: Option<u32>,
     
     // Relationships
-    pub home_location_id: u64,
-    pub home_county: Option<String>,
-    pub employer_location_id: Option<u64>,
-    pub work_county: Option<String>,
-    pub transport_id: Option<u64>,
-    pub family_agent_ids: Vec<u64>,
+    pub home_location_id: u32,
+    pub employer_location_id: Option<u32>,
+    pub family_agent_ids: Vec<u32>,
 }
 
 /// A governing body, corporation, or entity that owns locations and pays agents
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Organization {
-    pub id: u64,
+    pub id: u32,
     pub name: String,
     pub industry: String,
+    /// Estimated market value of the organization ($)
+    pub value: f64,
     pub avg_revenue: f64,
     pub avg_bills: f64,
     
@@ -48,27 +55,30 @@ pub struct StateEntity {
     pub name: String,
     /// Cash held by the state government
     pub cash_reserves: f64,
-    /// Sum of all economic activity (orgs + locations + agents)
+    /// Sum of all economic activity
     pub total_economy_value: f64,
     /// Current population count
-    pub population: u64,
+    pub population: u32,
     /// Average agent wealth
-    pub avg_wealth: f64,
+    pub avg_wealth: f32,
     /// Wealth disparity (0.0 = equal, 1.0 = extreme inequality)
-    pub wealth_disparity: f64,
-    /// Per-sector performance multiplier (1.0 = neutral, >1 = boom, <1 = bust)
-    pub sector_favorability: HashMap<String, f64>,
-    /// State-level tax rate (separate from federal)
-    pub state_tax_rate: f64,
-    /// Fed funds rate (affects borrowing costs)
-    pub fed_funds_rate: f64,
+    pub wealth_disparity: f32,
+    /// Per-sector performance multiplier
+    pub sector_favorability: HashMap<String, f32>,
+    /// State-level tax rate
+    pub state_tax_rate: f32,
+    /// Fed funds rate
+    pub fed_funds_rate: f32,
 }
 
 impl Default for StateEntity {
     fn default() -> Self {
         let mut sectors = HashMap::new();
-        for s in &["Retail", "Tech", "Healthcare", "Finance", "Manufacturing", "Government"] {
-            sectors.insert(s.to_string(), 1.0);
+        for s in &["Retail", "Tech", "Healthcare", "Finance", "Manufacturing", 
+                    "Government", "Accommodations/Food", "Education", 
+                    "Professional/Technical", "Real Estate", "Arts/Entertainment", 
+                    "Other Services", "Construction", "Information", "Health/Social"] {
+            sectors.insert(s.to_string(), 1.0f32);
         }
         Self {
             name: "New Jersey".to_string(),
@@ -96,12 +106,10 @@ pub enum TransportType {
 /// A unit of transport moving across the map
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Transport {
-    pub id: u64,
+    pub id: u32,
     pub transport_type: TransportType,
     pub capacity: u32,
-    /// Units of distance to move per hour
     pub speed_mph: f64,
-    /// The path the transport takes
     pub route: Vec<Coordinate>,
 }
 
@@ -118,6 +126,5 @@ pub enum WeatherType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Weather {
     pub condition: WeatherType,
-    /// 0.0 to 1.0 representing how severe the weather impact is
-    pub severity: f64,
+    pub severity: f32,
 }

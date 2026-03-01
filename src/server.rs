@@ -16,7 +16,7 @@ pub struct SimulationPayload {
     pub global_metrics: Global,
     pub active_agents_subset: Vec<Agent>,
     pub locations_subset: Vec<Location>,
-    pub organizations: std::collections::HashMap<u64, Organization>,
+    pub organizations: std::collections::HashMap<u32, Organization>,
     pub transports: Vec<Transport>,
 }
 
