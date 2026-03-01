@@ -29,14 +29,20 @@ export type VariableKey =
   | "wage_transport"
   | "wage_wholesale"
   | "wage_other"
-  | "private_establishments";
+  | "private_establishments"
+  | "population"
+  | "median_age"
+  | "pct_male"
+  | "pct_female"
+  | "pct_under_18"
+  | "pct_65_plus";
 
 export interface VariableConfig {
   key: VariableKey;
   label: string;
   description: string;
   /** Group for UI organization */
-  group?: "economic_indicators" | "municipality_sector_count" | "municipality_sector_wage";
+  group?: "economic_indicators" | "municipality_sector_count" | "municipality_sector_wage" | "demographic";
   /** d3-scale-chromatic interpolator scheme name */
   colorScheme: string;
   /** True = higher value is better (green end of scale) */
@@ -136,6 +142,14 @@ export const VARIABLES: VariableConfig[] = [
   { key: "wage_transport", label: "Transport Wages", group: "municipality_sector_wage", description: "Avg annual wage — Transport", colorScheme: "YlGnBu", higherIsBetter: true, format: fmtCurrency },
   { key: "wage_wholesale", label: "Wholesale Wages", group: "municipality_sector_wage", description: "Avg annual wage — Wholesale", colorScheme: "YlGnBu", higherIsBetter: true, format: fmtCurrency },
   { key: "wage_other", label: "Other Services Wages", group: "municipality_sector_wage", description: "Avg annual wage — Other Services", colorScheme: "YlGnBu", higherIsBetter: true, format: fmtCurrency },
+
+  // Demographics
+  { key: "population", label: "Total Population", group: "demographic", description: "Total population (ACS 2023)", colorScheme: "YlOrRd", higherIsBetter: true, format: fmtInt },
+  { key: "median_age", label: "Median Age", group: "demographic", description: "Median age of population", colorScheme: "YlGnBu", higherIsBetter: true, format: (v) => `${v.toFixed(1)} years` },
+  { key: "pct_male", label: "Male %", group: "demographic", description: "Percentage of male population", colorScheme: "Blues", higherIsBetter: true, format: fmtPct },
+  { key: "pct_female", label: "Female %", group: "demographic", description: "Percentage of female population", colorScheme: "RdPu", higherIsBetter: true, format: fmtPct },
+  { key: "pct_under_18", label: "Young % (Under 18)", group: "demographic", description: "Percentage of population under 18", colorScheme: "YlOrBr", higherIsBetter: true, format: fmtPct },
+  { key: "pct_65_plus", label: "Old % (65+)", group: "demographic", description: "Percentage of population 65 years and over", colorScheme: "GnBu", higherIsBetter: true, format: fmtPct },
 ];
 
 export const VARIABLE_MAP = Object.fromEntries(

@@ -38,6 +38,7 @@ import { useChoropleth } from "../../hooks/useChoropleth";
 import { useSatellites } from "../../hooks/useSatellites";
 import { useFlights } from "../../hooks/useFlights";
 import { useBusinesses } from "../../hooks/useBusinesses";
+import { useProperties } from "../../hooks/useProperties";
 import type { FlightState } from "../../hooks/useFlights";
 import CesiumNavigation from "cesium-navigation-es6";
 
@@ -298,7 +299,14 @@ export function CesiumMap() {
     showMunicipalities, setSelectedMunicipality, activeMunVariable,
     showBusinesses,
     agentMatchedGeoids,
+    showProperties,
+    setSelectedProperty,
   } = useMapStore();
+
+  const { getProperty } = useProperties({
+    viewer: viewerRef.current,
+    show: showProperties,
+  });
 
 
   // --- Live data hooks ---
@@ -1213,6 +1221,28 @@ export function CesiumMap() {
       if (picked instanceof Cesium3DTileFeature) {
         if (viewLevel === "tract" || viewLevel === "county") {
           navigateToBuilding(extractBuildingProps(picked));
+        }
+        return;
+      }
+
+      // High-performance primitive click (like properties)
+      if (picked?.primitive && picked.id?.type === "property") {
+        const prop = getProperty(picked.id.index);
+        if (prop) {
+          setSelectedProperty(prop);
+          // Auto-zoom if not at building level
+          if (viewLevel !== "building") {
+            // We can use navigateToBuilding with a mock building props to trigger the zoom
+            navigateToBuilding({
+              lat: prop.lat,
+              lon: prop.lon,
+              name: prop.address,
+              buildingType: "Residential",
+              levels: null,
+              material: null,
+              estimatedHeight: null
+            });
+          }
         }
         return;
       }

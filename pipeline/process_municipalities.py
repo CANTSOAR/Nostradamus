@@ -79,7 +79,7 @@ def build_tiger_lookup(gdf: gpd.GeoDataFrame) -> dict:
     return lookup
 
 
-def resolve_geoid(tiger_lookup: dict, county_fips: str, csv_town: str) -> str | None:
+def resolve_geoid(tiger_lookup: dict, county_fips: str, csv_town: str):
     # 1. Exact match (handles "Atlantic City" correctly)
     exact = (county_fips, csv_town.lower())
     if exact in tiger_lookup:
@@ -198,7 +198,7 @@ def main():
     wage_agg["avg_annual_wage"] = (wage_agg["ww"] / wage_agg["we"]).round(0)
     wage_agg = wage_agg[["mun_geoid", "avg_annual_wage"]]
 
-    # Top sector
+    # top sector
     sec_cols = list(sector_est_cols.values())
 
     def top_sector(row):
@@ -209,6 +209,13 @@ def main():
 
     t2023_agg["top_sector"] = t2023_agg.apply(top_sector, axis=1)
 
+    # --- Load ACS Demographics ---
+    print("Loading ACS demographics...")
+    acs_csv = DATA_DIR / "nj_acs.csv"
+    acs = pd.read_csv(acs_csv)
+    # Ensure GEOID is stripped/padded correctly to match mun_geoid (10 digits)
+    acs["mun_geoid"] = acs["GEOID"].astype(str).str.zfill(10)
+
     # --- Assemble final DataFrame ---
     econ = (
         t2023_agg
@@ -216,19 +223,27 @@ def main():
         .merge(wage_agg, on="mun_geoid", how="left")
         .merge(hist_df, on="mun_geoid", how="left")
     )
+    
+    # Merge demographics
+    econ = econ.merge(acs.drop(columns=["GEOID"]), on="mun_geoid", how="outer")
 
-    print(f"  Matched {econ['mun_geoid'].nunique()} municipalities with economic data "
+    print(f"  Matched {econ['mun_geoid'].nunique()} municipalities with data "
           f"out of {len(gdf)} total")
 
     # --- Spatial join ---
     result = gdf.merge(econ, on="mun_geoid", how="left")
 
     # Ensure numeric columns are proper types
+    demographics_cols = [
+        "median_income", "population", "poverty_rate", "unemployment_rate",
+        "median_age", "pct_male", "pct_female", "pct_under_18", "pct_65_plus"
+    ]
     num_cols = (
         ["private_establishments", "avg_annual_wage"]
         + [f"priv_est_{y}" for y in range(2018, 2024)]
         + list(sector_est_cols.values())
         + list(sector_wage_cols.values())
+        + demographics_cols
     )
     for col in num_cols:
         if col in result.columns:

@@ -55,6 +55,30 @@ interface MapStore {
   showBusinessList: boolean;
   toggleBusinessList: () => void;
 
+  // --- Property Atlas ---
+  showProperties: boolean;
+  toggleProperties: () => void;
+  selectedProperty: {
+    address: string;
+    city: string;
+    county: string;
+    net_value: number;
+    tax_rate: number;
+    tax_amount: number;
+    lat: number;
+    lon: number;
+  } | null;
+  setSelectedProperty: (p: {
+    address: string;
+    city: string;
+    county: string;
+    net_value: number;
+    tax_rate: number;
+    tax_amount: number;
+    lat: number;
+    lon: number;
+  } | null) => void;
+
   // --- Layer toggles ---
   showBuildings: boolean;
   toggleBuildings: () => void;
@@ -187,6 +211,11 @@ export const useMapStore = create<MapStore>((set) => ({
   setSelectedBusiness: (b) => set({ selectedBusiness: b }),
   showBusinessList: false,
   toggleBusinessList: () => set((s) => ({ showBusinessList: !s.showBusinessList })),
+
+  showProperties: false,
+  toggleProperties: () => set((s) => ({ showProperties: !s.showProperties })),
+  selectedProperty: null,
+  setSelectedProperty: (p) => set({ selectedProperty: p }),
 
   showBuildings: true,
   toggleBuildings: () => set((s) => ({ showBuildings: !s.showBuildings })),

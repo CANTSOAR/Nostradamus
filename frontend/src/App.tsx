@@ -16,6 +16,7 @@ import { AgentChat } from "./components/AgentChat";
 import { BusinessInfoPanel } from "./components/BusinessInfoPanel";
 import { BusinessListPanel } from "./components/BusinessListPanel";
 import { BusinessesInFrame } from "./components/BusinessesInFrame";
+import { PropertySidebar } from "./components/PropertySidebar";
 
 const panelStyle: React.CSSProperties = {
   background: "rgba(15,20,30,0.85)",
@@ -213,6 +214,7 @@ export default function App() {
       }
 
       <AgentChat />
+      <PropertySidebar />
     </div >
   );
 }

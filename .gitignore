@@ -20,3 +20,19 @@ data/output/
 .vscode/
 .idea/
 *.swp
+MOD4_Statewide.gdb.zip
+# MOD4 and Tax Data
+MOD4_Statewide.gdb.zip
+MOD4_Extracted/
+GTRhistory.xlsx
+NJ_Property_Taxes_2024.csv
+extract_taxes.py
+pipeline/data/nj_osm_addresses.csv
+NJ_Property_Taxes_Res_2024_Geocoded.csv
+NJ_Property_Taxes_Corp_2024_Geocoded.csv
+geocode_at_scale.py
+fetch_osm_addresses.py
+
+NJ_Property_Taxes_Corp_2024.csv
+NJ_Property_Taxes_Res_2024.csv
+NJ_Property_Geocoded_Final.csv

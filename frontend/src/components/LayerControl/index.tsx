@@ -57,6 +57,7 @@ export function LayerControl() {
     showMilitaryFlights, toggleMilitaryFlights,
     showTraffic, toggleTraffic,
     showCCTV, toggleCCTV,
+    showProperties, toggleProperties,
     detectionMode, setDetectionMode,
     isFlythroughActive, toggleFlythrough,
     isOrbitActive, toggleOrbit,
@@ -64,7 +65,14 @@ export function LayerControl() {
     trackedFlightIcao, setTrackedFlightIcao,
   } = useMapStore();
 
-  const munOptions = VARIABLES.filter(v => v.group?.startsWith("municipality_"));
+  const groups = {
+    economic_indicators: "Economics",
+    demographic: "Demographics",
+    municipality_sector_count: "Business Counts",
+    municipality_sector_wage: "Wages",
+  };
+
+  const munOptions = VARIABLES.filter(v => v.group && (v.group in groups || v.group.startsWith("municipality_")));
 
   return (
     <div>
@@ -89,8 +97,17 @@ export function LayerControl() {
                 cursor: "pointer"
               }}
             >
-              {munOptions.map(v => (
-                <option key={v.key} value={v.key}>{v.label}</option>
+              {Object.entries(groups).map(([id, label]) => (
+                <optgroup key={id} label={label.toUpperCase()} style={{ background: "#0f172a", color: "#64748b", fontSize: 9 }}>
+                  {munOptions
+                    .filter(v => v.group === id)
+                    .map(v => (
+                      <option key={v.key} value={v.key} style={{ color: "#e2e8f0", fontSize: 11 }}>
+                        {v.label}
+                      </option>
+                    ))
+                  }
+                </optgroup>
               ))}
             </select>
           </div>
@@ -146,6 +163,7 @@ export function LayerControl() {
 
         <Section title="GROUND" />
         <Toggle label="🏢 Business POIs" checked={showBusinesses} onChange={toggleBusinesses} color="#f43f5e" />
+        <Toggle label="💎 Property Atlas" checked={showProperties} onChange={toggleProperties} color="#94d2bd" />
         <Toggle label="🚗 NJ Traffic" checked={showTraffic} onChange={toggleTraffic} color="#facc15" />
         <Toggle label="📹 CCTV Cams" checked={showCCTV} onChange={toggleCCTV} color="#a855f7" />
 
